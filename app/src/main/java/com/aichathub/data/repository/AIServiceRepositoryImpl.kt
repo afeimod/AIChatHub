@@ -198,28 +198,51 @@ class AIServiceRepositoryImpl @Inject constructor(
                     "text" to (chatMessage.content.ifBlank { "请分析这个文件内容" })
                 ))
 
-                // 添加附件
+                // 添加附件 - 详细处理每种类型
                 chatMessage.attachments.forEach { attachment ->
                     when (attachment.type) {
                         AttachmentType.IMAGE -> {
-                            val imageData = when {
-                                !attachment.base64Data.isNullOrBlank() -> "data:${attachment.mimeType};base64,${attachment.base64Data}"
-                                !attachment.localPath.isNullOrBlank() -> "file://${attachment.localPath}"
-                                !attachment.url.isNullOrBlank() -> attachment.url
-                                else -> null
+                            // 优先使用base64Data
+                            val imageData = if (!attachment.base64Data.isNullOrBlank()) {
+                                "data:${attachment.mimeType};base64,${attachment.base64Data}"
+                            } else if (!attachment.localPath.isNullOrBlank()) {
+                                "file://${attachment.localPath}"
+                            } else if (!attachment.url.isNullOrBlank()) {
+                                attachment.url
+                            } else {
+                                null
                             }
-                            imageData?.let {
+                            
+                            if (imageData != null) {
                                 contentItems.add(mapOf(
                                     "type" to "image_url",
-                                    "image_url" to mapOf("url" to it, "detail" to "auto")
+                                    "image_url" to mapOf("url" to imageData, "detail" to "auto")
+                                ))
+                            } else {
+                                // 如果没有图片数据，添加文本说明
+                                contentItems.add(mapOf(
+                                    "type" to "text",
+                                    "text" to "[图片文件: ${attachment.fileName}]"
                                 ))
                             }
                         }
                         // PDF和文档类型以文本形式提及文件名
-                        AttachmentType.PDF, AttachmentType.DOCUMENT, AttachmentType.ARCHIVE -> {
+                        AttachmentType.PDF -> {
                             contentItems.add(mapOf(
                                 "type" to "text",
-                                "text" to "[文件: ${attachment.fileName}]"
+                                "text" to "[PDF文档: ${attachment.fileName}]"
+                            ))
+                        }
+                        AttachmentType.DOCUMENT -> {
+                            contentItems.add(mapOf(
+                                "type" to "text",
+                                "text" to "[文档: ${attachment.fileName}]"
+                            ))
+                        }
+                        AttachmentType.ARCHIVE -> {
+                            contentItems.add(mapOf(
+                                "type" to "text",
+                                "text" to "[压缩包: ${attachment.fileName}]"
                             ))
                         }
                         else -> {
@@ -254,9 +277,40 @@ class AIServiceRepositoryImpl @Inject constructor(
         temperature: Float,
         maxTokens: Int
     ): SendMessageResponse {
+        // 构建MiniMax消息，尝试支持多模态
+        val miniMaxMessages = messages.map { chatMessage ->
+            if (chatMessage.attachments.isEmpty()) {
+                // 纯文本消息
+                MessageDto(chatMessage.role.name.lowercase(), chatMessage.content)
+            } else {
+                // 多模态消息：构建包含附件信息的文本
+                val contentBuilder = StringBuilder()
+                if (chatMessage.content.isNotBlank()) {
+                    contentBuilder.append(chatMessage.content).append("\n")
+                }
+                // 添加附件信息
+                chatMessage.attachments.forEach { attachment ->
+                    when (attachment.type) {
+                        AttachmentType.IMAGE -> {
+                            // 尝试将图片作为base64发送
+                            if (!attachment.base64Data.isNullOrBlank()) {
+                                contentBuilder.append("[图片: base64编码数据]")
+                            } else {
+                                contentBuilder.append("[图片: ${attachment.fileName}]")
+                            }
+                        }
+                        else -> {
+                            contentBuilder.append("[文件: ${attachment.fileName}]")
+                        }
+                    }
+                }
+                MessageDto(chatMessage.role.name.lowercase(), contentBuilder.toString().trim())
+            }
+        }
+
         val request = MiniMaxChatRequest(
             model = model,
-            messages = messages.map { MessageDto(it.role.name.lowercase(), it.content) },
+            messages = miniMaxMessages,
             temperature = temperature,
             maxTokens = maxTokens
         )

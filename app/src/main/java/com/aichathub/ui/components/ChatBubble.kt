@@ -1,23 +1,27 @@
 package com.aichathub.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.SmartToy
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
+import com.aichathub.domain.model.AttachmentType
 import com.aichathub.domain.model.ChatMessage
+import com.aichathub.domain.model.MessageAttachment
 import com.aichathub.domain.model.MessageRole
 import com.aichathub.ui.theme.*
 import java.text.SimpleDateFormat
@@ -62,6 +66,67 @@ fun ChatBubble(
             )
         }
 
+        // 显示附件（如果有的话）
+        if (message.attachments.isNotEmpty()) {
+            Column(
+                modifier = Modifier
+                    .widthIn(max = 320.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                // 显示图片附件
+                message.attachments.filter { it.type == AttachmentType.IMAGE }.forEach { attachment ->
+                    Box(
+                        modifier = Modifier
+                            .size(200.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { /* 可以放大查看 */ }
+                    ) {
+                        val imageModel = when {
+                            !attachment.base64Data.isNullOrBlank() -> "data:${attachment.mimeType};base64,${attachment.base64Data}"
+                            !attachment.localPath.isNullOrBlank() -> attachment.localPath
+                            else -> ""
+                        }
+                        AsyncImage(
+                            model = imageModel,
+                            contentDescription = attachment.fileName,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
+                        )
+                    }
+                }
+
+                // 显示其他类型的附件标签
+                message.attachments.filter { it.type != AttachmentType.IMAGE }.forEach { attachment ->
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = when (attachment.type) {
+                                    AttachmentType.PDF -> Icons.Default.PictureAsPdf
+                                    AttachmentType.DOCUMENT -> Icons.Default.Description
+                                    AttachmentType.ARCHIVE -> Icons.Default.Archive
+                                    else -> Icons.Default.InsertDriveFile
+                                },
+                                contentDescription = null,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Text(
+                                text = attachment.fileName,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // 显示文本内容
         Box(
             modifier = Modifier
                 .clip(shape)
