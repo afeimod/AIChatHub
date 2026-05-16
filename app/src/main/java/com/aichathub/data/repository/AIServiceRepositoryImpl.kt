@@ -109,17 +109,13 @@ class AIServiceRepositoryImpl @Inject constructor(
         temperature: Float,
         maxTokens: Int
     ): SendMessageResponse {
-        val request = OpenAIChatRequest(
-            model = model,
-            messages = messages.map { MessageDto(it.role.name.lowercase(), it.content) },
-            temperature = temperature,
-            maxTokens = maxTokens
-        )
+        // DeepSeek使用与OpenAI相同的API格式，复用buildOpenAIRequestMap
+        val requestMap = buildOpenAIRequestMap(model, messages, temperature, maxTokens)
 
         val response = api.chatCompletion(
             url = endpoint,
             authorization = "Bearer $apiKey",
-            request = request
+            request = requestMap
         )
 
         if (response.isSuccessful) {
@@ -146,17 +142,13 @@ class AIServiceRepositoryImpl @Inject constructor(
         temperature: Float,
         maxTokens: Int
     ): SendMessageResponse {
-        val request = OpenAIChatRequest(
-            model = model,
-            messages = messages.map { MessageDto(it.role.name.lowercase(), it.content) },
-            temperature = temperature,
-            maxTokens = maxTokens
-        )
+        // 构建请求Map
+        val requestMap = buildOpenAIRequestMap(model, messages, temperature, maxTokens)
 
         val response = api.chatCompletion(
             url = endpoint,
             authorization = "Bearer $apiKey",
-            request = request
+            request = requestMap
         )
 
         if (response.isSuccessful) {
@@ -173,6 +165,77 @@ class AIServiceRepositoryImpl @Inject constructor(
         } else {
             throw Exception("API Error: ${response.code()} - ${response.message()}")
         }
+    }
+
+    /**
+     * 构建OpenAI/DeepSeek 兼容的请求Map
+     * 支持纯文本消息和多模态消息（vision API）
+     */
+    private fun buildOpenAIRequestMap(
+        model: String,
+        messages: List<ChatMessage>,
+        temperature: Float,
+        maxTokens: Int
+    ): Map<String, Any> {
+        val messagesList = messages.map { chatMessage ->
+            if (chatMessage.attachments.isEmpty()) {
+                // 纯文本消息
+                mapOf(
+                    "role" to chatMessage.role.name.lowercase(),
+                    "content" to chatMessage.content
+                )
+            } else {
+                // 多模态消息：包含附件
+                val contentItems = mutableListOf<Map<String, Any>>()
+
+                // 添加文本内容
+                if (chatMessage.content.isNotBlank()) {
+                    contentItems.add(mapOf(
+                        "type" to "text",
+                        "text" to chatMessage.content
+                    ))
+                }
+
+                // 添加图片附件
+                chatMessage.attachments.forEach { attachment ->
+                    when (attachment.type) {
+                        AttachmentType.IMAGE -> {
+                            val imageData = when {
+                                !attachment.base64Data.isNullOrBlank() -> "data:${attachment.mimeType};base64,${attachment.base64Data}"
+                                !attachment.localPath.isNullOrBlank() -> "file://${attachment.localPath}"
+                                !attachment.url.isNullOrBlank() -> attachment.url
+                                else -> null
+                            }
+                            imageData?.let {
+                                contentItems.add(mapOf(
+                                    "type" to "image_url",
+                                    "image_url" to mapOf("url" to it, "detail" to "auto")
+                                ))
+                            }
+                        }
+                        // 其他类型的附件暂时以文本形式提及
+                        else -> {
+                            contentItems.add(mapOf(
+                                "type" to "text",
+                                "text" to "[附件: ${attachment.fileName}]"
+                            ))
+                        }
+                    }
+                }
+
+                mapOf(
+                    "role" to chatMessage.role.name.lowercase(),
+                    "content" to contentItems
+                )
+            }
+        }
+
+        return mapOf(
+            "model" to model,
+            "messages" to messagesList,
+            "temperature" to temperature,
+            "max_tokens" to maxTokens
+        )
     }
 
     private suspend fun sendMiniMaxMessage(
@@ -227,9 +290,40 @@ class AIServiceRepositoryImpl @Inject constructor(
         val contents = messages
             .filter { it.role == MessageRole.USER || it.role == MessageRole.ASSISTANT }
             .map { msg ->
-                ContentDto(
-                    parts = listOf(PartDto(text = msg.content))
-                )
+                val parts = mutableListOf<PartDto>()
+
+                // 添加文本内容
+                if (msg.content.isNotBlank()) {
+                    parts.add(PartDto(text = msg.content))
+                }
+
+                // 处理图片附件
+                msg.attachments.forEach { attachment ->
+                    when (attachment.type) {
+                        AttachmentType.IMAGE -> {
+                            val base64Data = when {
+                                !attachment.base64Data.isNullOrBlank() -> attachment.base64Data
+                                else -> null
+                            }
+                            base64Data?.let {
+                                parts.add(PartDto(
+                                    inlineData = InlineDataDto(
+                                        mimeType = attachment.mimeType,
+                                        data = it
+                                    )
+                                ))
+                            }
+                        }
+                        // 其他类型附件以文本形式提及
+                        else -> {
+                            parts.add(PartDto(
+                                text = "[附件: ${attachment.fileName}]"
+                            ))
+                        }
+                    }
+                }
+
+                ContentDto(parts = parts)
             }
 
         val request = GeminiRequest(

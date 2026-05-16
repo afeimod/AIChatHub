@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.Flow
 interface AIServiceRepository {
     /**
      * 发送消息并获取AI响应
+     * @param messages 消息列表，包含可能的附件
      */
     suspend fun sendMessage(
         platform: AIPlatform,

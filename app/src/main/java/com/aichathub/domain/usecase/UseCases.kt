@@ -17,6 +17,7 @@ import javax.inject.Inject
 
 /**
  * 发送消息用例
+ * 支持多模态：包含文件附件的消息
  */
 class SendMessageUseCase @Inject constructor(
     private val aiServiceRepository: AIServiceRepository,
@@ -29,7 +30,8 @@ class SendMessageUseCase @Inject constructor(
         platform: AIPlatform,
         model: String,
         temperature: Float = 0.7f,
-        maxTokens: Int = 2048
+        maxTokens: Int = 2048,
+        attachments: List<MessageAttachment> = emptyList()  // 新增：附件列表参数
     ): Result<SendMessageResponse> {
         // 获取会话
         val session = chatSessionRepository.getSession(sessionId)
@@ -47,17 +49,18 @@ class SendMessageUseCase @Inject constructor(
 
         // 构建消息列表
         val messages = session.messages.toMutableList().apply {
-            add(
-                ChatMessage(
-                    role = MessageRole.USER,
-                    content = userMessage,
-                    platform = platform,
-                    model = model
-                )
+            // 如果有附件，添加到消息中
+            val messageWithAttachments = ChatMessage(
+                role = MessageRole.USER,
+                content = userMessage,
+                platform = platform,
+                model = model,
+                attachments = attachments  // 新增：包含附件
             )
+            add(messageWithAttachments)
         }
 
-        // 发送请求
+        // 发送请求（messages 包含附件信息，仓库层会处理）
         val result = aiServiceRepository.sendMessage(
             platform = platform,
             apiKey = decryptedKey,
