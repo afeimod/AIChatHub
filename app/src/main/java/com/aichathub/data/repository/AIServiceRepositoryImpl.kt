@@ -277,8 +277,7 @@ class AIServiceRepositoryImpl @Inject constructor(
         temperature: Float,
         maxTokens: Int
     ): SendMessageResponse {
-        // 直接传递消息内容，让API处理附件
-        // MiniMax API 期望的消息格式
+        // 直接传递消息内容
         val miniMaxMessages = messages.map { chatMessage ->
             if (chatMessage.attachments.isEmpty()) {
                 // 纯文本消息
@@ -336,11 +335,19 @@ class AIServiceRepositoryImpl @Inject constructor(
 
         if (response.isSuccessful) {
             val body = response.body()!!
-            // 尝试从 messages 格式获取内容（MiniMax自定义格式）
-            val contentFromMessages = body.choices.firstOrNull()?.messages?.lastOrNull()?.content
-            // 尝试从 message 格式获取内容（OpenAI兼容格式）
-            val contentFromMessage = body.choices.firstOrNull()?.message?.content
-            val content = contentFromMessages ?: contentFromMessage ?: ""
+            
+            // 安全地获取内容
+            val content = try {
+                // 尝试从 messages 格式获取内容
+                val contentFromMessages = body.choices?.firstOrNull()?.messages?.lastOrNull()?.content
+                // 尝试从 message 格式获取内容
+                val contentFromMessage = body.choices?.firstOrNull()?.message?.content
+                contentFromMessages ?: contentFromMessage ?: ""
+            } catch (e: Exception) {
+                // 如果解析失败，返回空字符串
+                ""
+            }
+            
             return SendMessageResponse(
                 content = content,
                 platform = AIPlatform.MINIMAX,
@@ -350,7 +357,9 @@ class AIServiceRepositoryImpl @Inject constructor(
                 }
             )
         } else {
-            throw Exception("API Error: ${response.code()} - ${response.message()}")
+            // 尝试读取错误信息
+            val errorBody = response.errorBody()?.string() ?: ""
+            throw Exception("API Error ${response.code()}: $errorBody")
         }
     }
 
