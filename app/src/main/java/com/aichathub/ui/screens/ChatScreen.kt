@@ -1,20 +1,30 @@
 package com.aichathub.ui.screens
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aichathub.domain.model.AIPlatform
+import com.aichathub.domain.model.ChatSession
+import com.aichathub.domain.model.MessageAttachment
 import com.aichathub.ui.components.*
 import com.aichathub.ui.theme.*
 import com.aichathub.ui.viewmodel.ChatViewModel
@@ -28,6 +38,27 @@ fun ChatScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
+    val context = LocalContext.current
+    
+    // 侧边栏状态
+    var showDrawer by remember { mutableStateOf(false) }
+
+    // 文件选择器
+    val documentLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri?.let { viewModel.addAttachment(it) }
+    }
+
+    // 图片选择器
+    val imageLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri?.let { viewModel.addAttachment(it) }
+    }
+
+    // 显示附件类型选择对话框
+    var showAttachmentDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(uiState.messages.size) {
         if (uiState.messages.isNotEmpty()) {
@@ -52,16 +83,16 @@ fun ChatScreen(
                     }
                 },
                 navigationIcon = {
-                    IconButton(onClick = onNavigateToAPIKeys) {
-                        Icon(Icons.Default.Key, contentDescription = "API Keys")
+                    IconButton(onClick = { showDrawer = true }) {
+                        Icon(Icons.Default.Menu, contentDescription = "历史记录")
                     }
                 },
                 actions = {
                     IconButton(onClick = { viewModel.createNewSession() }) {
-                        Icon(Icons.Default.Add, contentDescription = "New Chat")
+                        Icon(Icons.Default.Add, contentDescription = "新建对话")
                     }
                     IconButton(onClick = onNavigateToSettings) {
-                        Icon(Icons.Default.Settings, contentDescription = "Settings")
+                        Icon(Icons.Default.Settings, contentDescription = "设置")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -73,13 +104,29 @@ fun ChatScreen(
             )
         },
         bottomBar = {
-            // 使用 navigationBarsPadding() 确保不被系统导航栏遮挡
-            MessageInput(
+            MessageInputWithAttachment(
                 text = uiState.inputText,
                 onTextChange = viewModel::updateInputText,
                 onSend = viewModel::sendMessage,
+                onAttachFile = { showAttachmentDialog = true },
                 enabled = !uiState.isLoading && uiState.activeAPIKey != null,
+                attachments = uiState.pendingAttachments,
+                onRemoveAttachment = { viewModel.removeAttachment(it) },
                 modifier = Modifier.navigationBarsPadding()
+            )
+        },
+        drawerContent = {
+            SessionDrawer(
+                sessions = uiState.allSessions,
+                currentSessionId = uiState.currentSession?.id,
+                onSessionSelect = { session ->
+                    viewModel.selectSession(session)
+                    showDrawer = false
+                },
+                onSessionDelete = { sessionId ->
+                    viewModel.deleteSession(sessionId)
+                },
+                onClose = { showDrawer = false }
             )
         },
         containerColor = MaterialTheme.colorScheme.background
@@ -89,7 +136,7 @@ fun ChatScreen(
                 .fillMaxSize()
                 .padding(paddingValues)
                 .background(MaterialTheme.colorScheme.background)
-                .imePadding() // 添加 IME padding 以防键盘遮挡
+                .imePadding()
         ) {
             // 平台选择器
             Row(
@@ -143,7 +190,7 @@ fun ChatScreen(
                     modifier = Modifier.padding(16.dp),
                     action = {
                         TextButton(onClick = viewModel::clearError) {
-                            Text("Dismiss")
+                            Text("关闭")
                         }
                     }
                 ) {
@@ -179,5 +226,172 @@ fun ChatScreen(
                 }
             }
         }
+    }
+
+    // 附件类型选择对话框
+    if (showAttachmentDialog) {
+        AttachmentTypeDialog(
+            onDismiss = { showAttachmentDialog = false },
+            onSelectImage = {
+                imageLauncher.launch("image/*")
+            },
+            onSelectDocument = {
+                documentLauncher.launch("*/*")
+            },
+            onSelectCamera = {
+                // TODO: 实现拍照功能
+            }
+        )
+    }
+}
+
+/**
+ * 历史会话抽屉组件
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SessionDrawer(
+    sessions: List<ChatSession>,
+    currentSessionId: String?,
+    onSessionSelect: (ChatSession) -> Unit,
+    onSessionDelete: (String) -> Unit,
+    onClose: () -> Unit
+) {
+    ModalDrawerSheet {
+        Column(
+            modifier = Modifier.fillMaxSize()
+        ) {
+            // 抽屉标题
+            TopAppBar(
+                title = { Text("历史对话") },
+                navigationIcon = {
+                    IconButton(onClick = onClose) {
+                        Icon(Icons.Default.Close, contentDescription = "关闭")
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer
+                )
+            )
+
+            if (sessions.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "暂无历史对话",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = TextSecondary
+                    )
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(vertical = 8.dp)
+                ) {
+                    items(sessions) { session ->
+                        SessionItem(
+                            session = session,
+                            isSelected = session.id == currentSessionId,
+                            onClick = { onSessionSelect(session) },
+                            onDelete = { onSessionDelete(session.id) }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 会话列表项
+ */
+@Composable
+fun SessionItem(
+    session: ChatSession,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    onDelete: () -> Unit
+) {
+    var showDeleteDialog by remember { mutableStateOf(false) }
+    
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        color = if (isSelected) {
+            MaterialTheme.colorScheme.primaryContainer
+        } else {
+            MaterialTheme.colorScheme.surface
+        }
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // 会话图标
+            Icon(
+                imageVector = Icons.Default.Chat,
+                contentDescription = null,
+                tint = if (isSelected) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    TextSecondary
+                }
+            )
+            
+            Spacer(modifier = Modifier.width(12.dp))
+            
+            // 会话信息
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = session.title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = "${session.platform.displayName} · ${session.messages.size}条消息",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary
+                )
+            }
+            
+            // 删除按钮
+            IconButton(onClick = { showDeleteDialog = true }) {
+                Icon(
+                    imageVector = Icons.Default.Delete,
+                    contentDescription = "删除",
+                    tint = TextSecondary
+                )
+            }
+        }
+    }
+    
+    // 删除确认对话框
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = { Text("删除对话") },
+            text = { Text("确定要删除这个对话吗？") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onDelete()
+                        showDeleteDialog = false
+                    }
+                ) {
+                    Text("删除")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }) {
+                    Text("取消")
+                }
+            }
+        )
     }
 }
