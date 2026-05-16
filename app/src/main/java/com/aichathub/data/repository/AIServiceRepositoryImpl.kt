@@ -237,7 +237,7 @@ class AIServiceRepositoryImpl @Inject constructor(
         )
 
         val response = api.geminiGenerateContent(
-            url = "${AIPlatform.GEMINI.defaultEndpoint}/$model:generateContent",
+            url = "${endpoint.trimEnd('/')}/$model:generateContent",
             apiKey = apiKey,
             request = request
         )

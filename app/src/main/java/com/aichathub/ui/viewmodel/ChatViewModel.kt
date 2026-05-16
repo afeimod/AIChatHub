@@ -49,27 +49,31 @@ class ChatViewModel @Inject constructor(
 
     private fun loadInitialData() {
         viewModelScope.launch {
-            // 加载活跃的API密钥
-            apiKeyRepository.getActiveAPIKey().collect { activeKey ->
+            // 加载设置（用于默认值）
+            getSettingsUseCase().collect { settings ->
                 _uiState.update {
                     it.copy(
-                        activeAPIKey = activeKey,
-                        selectedPlatform = activeKey?.platform ?: it.selectedPlatform,
-                        selectedModel = activeKey?.platform?.defaultModel ?: it.selectedModel
+                        settings = settings,
+                        // 仅当没有选择平台时使用设置中的默认值
+                        selectedPlatform = if (it.selectedPlatform == AIPlatform.DEEPSEEK) settings.defaultPlatform else it.selectedPlatform,
+                        selectedModel = if (it.selectedModel == AIPlatform.DEEPSEEK.defaultModel) settings.defaultPlatform.defaultModel else it.selectedModel
                     )
                 }
             }
         }
 
         viewModelScope.launch {
-            // 加载设置
-            getSettingsUseCase().collect { settings ->
-                _uiState.update {
-                    it.copy(
-                        settings = settings,
-                        selectedPlatform = settings.defaultPlatform,
-                        selectedModel = settings.defaultPlatform.defaultModel
-                    )
+            // 加载活跃的API密钥
+            apiKeyRepository.getActiveAPIKey().collect { activeKey ->
+                if (activeKey != null) {
+                    _uiState.update {
+                        it.copy(
+                            activeAPIKey = activeKey,
+                            // 如果没有用户手动选择，使用API密钥对应的平台
+                            selectedPlatform = if (it.selectedPlatform == AIPlatform.DEEPSEEK && it.messages.isEmpty()) activeKey.platform else it.selectedPlatform,
+                            selectedModel = if (it.selectedModel == AIPlatform.DEEPSEEK.defaultModel && it.messages.isEmpty()) activeKey.platform.defaultModel else it.selectedModel
+                        )
+                    }
                 }
             }
         }

@@ -99,33 +99,18 @@ class ChatSessionRepositoryImpl @Inject constructor(
     }
 
     override suspend fun getSession(id: String): com.aichathub.domain.model.ChatSession? {
-        return secureStorage.getAllSessions().let { flow ->
-            var result: com.aichathub.domain.model.ChatSession? = null
-            flow.collect { sessions ->
-                result = sessions.find { it.id == id }
-                return@collect
-            }
-            result
-        }
+        return secureStorage.getAllSessions().first().find { it.id == id }
     }
 
     override suspend fun createSession(session: com.aichathub.domain.model.ChatSession): String {
-        val currentSessions = mutableListOf<com.aichathub.domain.model.ChatSession>()
-        secureStorage.getAllSessions().collect { sessions ->
-            currentSessions.addAll(sessions)
-            return@collect
-        }
+        val currentSessions = secureStorage.getAllSessions().first().toMutableList()
         currentSessions.add(0, session) // 新会话添加到最前面
         secureStorage.saveSessions(currentSessions)
         return session.id
     }
 
     override suspend fun updateSession(session: com.aichathub.domain.model.ChatSession) {
-        val currentSessions = mutableListOf<com.aichathub.domain.model.ChatSession>()
-        secureStorage.getAllSessions().collect { sessions ->
-            currentSessions.addAll(sessions)
-            return@collect
-        }
+        val currentSessions = secureStorage.getAllSessions().first().toMutableList()
         val index = currentSessions.indexOfFirst { it.id == session.id }
         if (index >= 0) {
             currentSessions[index] = session
@@ -134,11 +119,7 @@ class ChatSessionRepositoryImpl @Inject constructor(
     }
 
     override suspend fun deleteSession(id: String) {
-        val currentSessions = mutableListOf<com.aichathub.domain.model.ChatSession>()
-        secureStorage.getAllSessions().collect { sessions ->
-            currentSessions.addAll(sessions)
-            return@collect
-        }
+        val currentSessions = secureStorage.getAllSessions().first().toMutableList()
         currentSessions.removeAll { it.id == id }
         secureStorage.saveSessions(currentSessions)
     }

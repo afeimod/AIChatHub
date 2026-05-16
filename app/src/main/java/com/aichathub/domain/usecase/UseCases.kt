@@ -39,12 +39,11 @@ class SendMessageUseCase @Inject constructor(
         val apiKeyInfo = apiKeyRepository.getActiveAPIKey().first()
             ?: return Result.failure(Exception("请先配置API密钥"))
 
-        if (apiKeyInfo.platform != platform) {
-            return Result.failure(Exception("当前激活的API密钥不匹配所选平台"))
-        }
-
         val decryptedKey = apiKeyRepository.getDecryptedAPIKey(apiKeyInfo.id)
             ?: return Result.failure(Exception("无法获取API密钥"))
+
+        // 允许用户在不同平台间切换API密钥（因为用户可能配置了自定义端点）
+        // 只要能获取到解密后的密钥就允许发送
 
         // 构建消息列表
         val messages = session.messages.toMutableList().apply {
