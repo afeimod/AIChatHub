@@ -3,6 +3,7 @@ package com.aichathub.data.repository
 import com.aichathub.data.local.SecureKeyStorage
 import com.aichathub.data.model.*
 import com.aichathub.data.remote.AIServiceApi
+import com.aichathub.data.remote.MiniMaxVLMRequest
 import com.aichathub.domain.model.*
 import com.aichathub.domain.repository.AIServiceRepository
 import kotlinx.coroutines.Dispatchers
