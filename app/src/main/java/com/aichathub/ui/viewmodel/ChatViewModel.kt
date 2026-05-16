@@ -115,14 +115,10 @@ class ChatViewModel @Inject constructor(
             val fileName = getFileName(uri) ?: "file_${System.currentTimeMillis()}"
             val fileSize = getFileSize(uri)
 
-            // 读取文件内容并转换为Base64（对于小文件）
-            val base64Data = if (fileSize < 5 * 1024 * 1024) { // 小于5MB的文件使用Base64
-                contentResolver.openInputStream(uri)?.use { inputStream ->
-                    val bytes = inputStream.readBytes()
-                    Base64.getEncoder().encodeToString(bytes)
-                }
-            } else {
-                null // 大文件使用本地路径
+            // 读取文件内容并转换为Base64
+            val base64Data = contentResolver.openInputStream(uri)?.use { inputStream ->
+                val bytes = inputStream.readBytes()
+                Base64.getEncoder().encodeToString(bytes)
             }
 
             val attachment = MessageAttachment(
@@ -131,7 +127,8 @@ class ChatViewModel @Inject constructor(
                 size = fileSize,
                 type = determineAttachmentType(mimeType),
                 localPath = uri.toString(),
-                base64Data = base64Data
+                base64Data = base64Data,
+                url = null
             )
 
             _uiState.update {

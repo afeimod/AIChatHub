@@ -192,15 +192,13 @@ class AIServiceRepositoryImpl @Inject constructor(
                 // 多模态消息：包含附件
                 val contentItems = mutableListOf<Map<String, Any>>()
 
-                // 添加文本内容
-                if (chatMessage.content.isNotBlank()) {
-                    contentItems.add(mapOf(
-                        "type" to "text",
-                        "text" to chatMessage.content
-                    ))
-                }
+                // 添加文本内容（即使是空字符串也要添加文本项）
+                contentItems.add(mapOf(
+                    "type" to "text",
+                    "text" to (chatMessage.content.ifBlank { "请分析这个文件内容" })
+                ))
 
-                // 添加图片附件
+                // 添加附件
                 chatMessage.attachments.forEach { attachment ->
                     when (attachment.type) {
                         AttachmentType.IMAGE -> {
@@ -217,7 +215,13 @@ class AIServiceRepositoryImpl @Inject constructor(
                                 ))
                             }
                         }
-                        // 其他类型的附件暂时以文本形式提及
+                        // PDF和文档类型以文本形式提及文件名
+                        AttachmentType.PDF, AttachmentType.DOCUMENT, AttachmentType.ARCHIVE -> {
+                            contentItems.add(mapOf(
+                                "type" to "text",
+                                "text" to "[文件: ${attachment.fileName}]"
+                            ))
+                        }
                         else -> {
                             contentItems.add(mapOf(
                                 "type" to "text",
