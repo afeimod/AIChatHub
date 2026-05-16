@@ -48,9 +48,19 @@ interface AIServiceApi {
     suspend fun miniMaxVLM(
         @Url url: String,
         @Header("Authorization") authorization: String,
-        @Body request: Map<String, @JvmSuppressWildcards Any>
+        @Body request: MiniMaxVLMRequest
     ): Response<MiniMaxVLMResponse>
 }
+
+/**
+ * MiniMax VLM 请求模型
+ */
+@kotlinx.serialization.Serializable
+data class MiniMaxVLMRequest(
+    val prompt: String,
+    @kotlinx.serialization.SerialName("image_url")
+    val imageUrl: String
+)
 
 /**
  * MiniMax VLM 响应模型
@@ -59,7 +69,14 @@ interface AIServiceApi {
 data class MiniMaxVLMResponse(
     val id: String? = null,
     val choices: List<MiniMaxVLMChoice>? = null,
-    val created: Long? = null
+    val created: Long? = null,
+    val base_resp: MiniMaxBaseResp? = null
+)
+
+@kotlinx.serialization.Serializable
+data class MiniMaxBaseResp(
+    val status_code: Int = 0,
+    val status_msg: String = ""
 )
 
 @kotlinx.serialization.Serializable
