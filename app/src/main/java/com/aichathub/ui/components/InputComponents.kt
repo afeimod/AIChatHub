@@ -6,6 +6,10 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Psychology
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -77,7 +81,7 @@ fun MessageInput(
                 )
             ) {
                 Icon(
-                    imageVector = Icons.Default.Send,
+                    imageVector = Icons.Filled.Send,
                     contentDescription = "发送"
                 )
             }
@@ -85,6 +89,7 @@ fun MessageInput(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PlatformSelector(
     selectedPlatform: com.aichathub.domain.model.AIPlatform,
@@ -105,7 +110,7 @@ fun PlatformSelector(
             label = { Text("选择平台") },
             leadingIcon = {
                 Icon(
-                    imageVector = com.aichathub.ui.components.getPlatformIcon(selectedPlatform),
+                    imageVector = getPlatformIcon(selectedPlatform),
                     contentDescription = null
                 )
             },
@@ -129,7 +134,7 @@ fun PlatformSelector(
                     text = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
-                                imageVector = com.aichathub.ui.components.getPlatformIcon(platform),
+                                imageVector = getPlatformIcon(platform),
                                 contentDescription = null,
                                 modifier = Modifier.size(24.dp)
                             )
@@ -147,6 +152,7 @@ fun PlatformSelector(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ModelSelector(
     selectedModel: String,
@@ -194,12 +200,10 @@ fun ModelSelector(
     }
 }
 
-object getPlatformIcon {
-    @Composable
-    operator fun invoke(platform: com.aichathub.domain.model.AIPlatform) = when (platform) {
-        com.aichathub.domain.model.AIPlatform.DEEPSEEK -> androidx.compose.material.icons.Icons.Default.Cloud
-        com.aichathub.domain.model.AIPlatform.MINIMAX -> androidx.compose.material.icons.Icons.Default.PlayArrow
-        com.aichathub.domain.model.AIPlatform.OPENAI -> androidx.compose.material.icons.Icons.Default.Psychology
-        com.aichathub.domain.model.AIPlatform.GEMINI -> androidx.compose.material.icons.Icons.Default.AutoAwesome
-    }
+@Composable
+fun getPlatformIcon(platform: com.aichathub.domain.model.AIPlatform) = when (platform) {
+    com.aichathub.domain.model.AIPlatform.DEEPSEEK -> Icons.Filled.Cloud
+    com.aichathub.domain.model.AIPlatform.MINIMAX -> Icons.Filled.PlayArrow
+    com.aichathub.domain.model.AIPlatform.OPENAI -> Icons.Filled.Psychology
+    com.aichathub.domain.model.AIPlatform.GEMINI -> Icons.Filled.AutoAwesome
 }
