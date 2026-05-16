@@ -14,6 +14,7 @@ interface AIServiceRepository {
         platform: AIPlatform,
         apiKey: String,
         model: String,
+        endpoint: String,
         messages: List<ChatMessage>,
         temperature: Float,
         maxTokens: Int

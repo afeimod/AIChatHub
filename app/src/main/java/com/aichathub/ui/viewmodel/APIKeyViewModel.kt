@@ -26,7 +26,8 @@ class APIKeyViewModel @Inject constructor(
     private val addAPIKeyUseCase: AddAPIKeyUseCase,
     private val deleteAPIKeyUseCase: DeleteAPIKeyUseCase,
     private val setActiveAPIKeyUseCase: SetActiveAPIKeyUseCase,
-    private val testConnectionUseCase: TestConnectionUseCase
+    private val testConnectionUseCase: TestConnectionUseCase,
+    private val apiKeyRepository: com.aichathub.domain.repository.APIKeyRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(APIKeyUiState())
@@ -73,7 +74,7 @@ class APIKeyViewModel @Inject constructor(
                 customEndpoint = customEndpoint
             )
 
-            val result = addAPIKeyUseCase(platform, apiKey, name)
+            val result = addAPIKeyUseCase(platform, apiKey, name, customEndpoint)
             result.fold(
                 onSuccess = {
                     _uiState.update { it.copy(isLoading = false, showAddDialog = false) }
@@ -118,13 +119,19 @@ class APIKeyViewModel @Inject constructor(
         }
     }
 
-    fun testConnection(platform: AIPlatform, apiKey: String, endpoint: String, model: String) {
+    fun testConnection(keyInfo: APIKeyInfo, model: String) {
         viewModelScope.launch {
             _uiState.update { it.copy(isTesting = true, testResult = null) }
+
+            val decryptedKey = apiKeyRepository.getDecryptedAPIKey(keyInfo.id)
+                ?: return@launch _uiState.update {
+                    it.copy(isTesting = false, testResult = "无法读取API密钥")
+                }
+
             val result = testConnectionUseCase(
-                platform = platform,
-                apiKey = apiKey,
-                endpoint = endpoint,
+                platform = keyInfo.platform,
+                apiKey = decryptedKey,
+                endpoint = keyInfo.getEndpoint(),
                 model = model
             )
             result.fold(

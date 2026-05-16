@@ -51,7 +51,13 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             // 加载活跃的API密钥
             apiKeyRepository.getActiveAPIKey().collect { activeKey ->
-                _uiState.update { it.copy(activeAPIKey = activeKey) }
+                _uiState.update {
+                    it.copy(
+                        activeAPIKey = activeKey,
+                        selectedPlatform = activeKey?.platform ?: it.selectedPlatform,
+                        selectedModel = activeKey?.platform?.defaultModel ?: it.selectedModel
+                    )
+                }
             }
         }
 

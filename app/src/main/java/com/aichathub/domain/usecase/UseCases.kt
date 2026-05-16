@@ -63,6 +63,7 @@ class SendMessageUseCase @Inject constructor(
             platform = platform,
             apiKey = decryptedKey,
             model = model,
+            endpoint = apiKeyInfo.getEndpoint(),
             messages = messages,
             temperature = temperature,
             maxTokens = maxTokens
@@ -132,7 +133,8 @@ class AddAPIKeyUseCase @Inject constructor(
     suspend operator fun invoke(
         platform: AIPlatform,
         apiKey: String,
-        name: String
+        name: String,
+        customEndpoint: String? = null
     ): Result<Unit> {
         return try {
             if (apiKey.isBlank()) {
@@ -143,7 +145,8 @@ class AddAPIKeyUseCase @Inject constructor(
                 id = java.util.UUID.randomUUID().toString(),
                 platform = platform,
                 apiKey = apiKey,
-                name = name.ifBlank { platform.displayName }
+                name = name.ifBlank { platform.displayName },
+                customEndpoint = customEndpoint
             )
             apiKeyRepository.addAPIKey(info)
             Result.success(Unit)

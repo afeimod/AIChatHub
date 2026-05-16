@@ -22,16 +22,17 @@ class AIServiceRepositoryImpl @Inject constructor(
         platform: AIPlatform,
         apiKey: String,
         model: String,
+        endpoint: String,
         messages: List<ChatMessage>,
         temperature: Float,
         maxTokens: Int
     ): Result<SendMessageResponse> = withContext(Dispatchers.IO) {
         try {
             val result = when (platform) {
-                AIPlatform.DEEPSEEK -> sendDeepSeekMessage(apiKey, model, messages, temperature, maxTokens)
-                AIPlatform.OPENAI -> sendOpenAIMessage(apiKey, model, messages, temperature, maxTokens)
-                AIPlatform.MINIMAX -> sendMiniMaxMessage(apiKey, model, messages, temperature, maxTokens)
-                AIPlatform.GEMINI -> sendGeminiMessage(apiKey, model, messages, temperature, maxTokens)
+                AIPlatform.DEEPSEEK -> sendDeepSeekMessage(apiKey, endpoint, model, messages, temperature, maxTokens)
+                AIPlatform.OPENAI -> sendOpenAIMessage(apiKey, endpoint, model, messages, temperature, maxTokens)
+                AIPlatform.MINIMAX -> sendMiniMaxMessage(apiKey, endpoint, model, messages, temperature, maxTokens)
+                AIPlatform.GEMINI -> sendGeminiMessage(apiKey, endpoint, model, messages, temperature, maxTokens)
             }
             Result.success(result)
         } catch (e: Exception) {
@@ -87,7 +88,7 @@ class AIServiceRepositoryImpl @Inject constructor(
                         generationConfig = GenerationConfigDto(maxOutputTokens = 5)
                     )
                     val response = api.geminiGenerateContent(
-                        url = "$endpoint$model:generateContent",
+                        url = endpoint.trimEnd('/') + "/$model:generateContent",
                         apiKey = apiKey,
                         request = request
                     )
@@ -102,6 +103,7 @@ class AIServiceRepositoryImpl @Inject constructor(
 
     private suspend fun sendDeepSeekMessage(
         apiKey: String,
+        endpoint: String,
         model: String,
         messages: List<ChatMessage>,
         temperature: Float,
@@ -115,7 +117,7 @@ class AIServiceRepositoryImpl @Inject constructor(
         )
 
         val response = api.chatCompletion(
-            url = AIPlatform.DEEPSEEK.defaultEndpoint,
+            url = endpoint,
             authorization = "Bearer $apiKey",
             request = request
         )
@@ -138,6 +140,7 @@ class AIServiceRepositoryImpl @Inject constructor(
 
     private suspend fun sendOpenAIMessage(
         apiKey: String,
+        endpoint: String,
         model: String,
         messages: List<ChatMessage>,
         temperature: Float,
@@ -151,7 +154,7 @@ class AIServiceRepositoryImpl @Inject constructor(
         )
 
         val response = api.chatCompletion(
-            url = AIPlatform.OPENAI.defaultEndpoint,
+            url = endpoint,
             authorization = "Bearer $apiKey",
             request = request
         )
@@ -174,6 +177,7 @@ class AIServiceRepositoryImpl @Inject constructor(
 
     private suspend fun sendMiniMaxMessage(
         apiKey: String,
+        endpoint: String,
         model: String,
         messages: List<ChatMessage>,
         temperature: Float,
@@ -187,7 +191,7 @@ class AIServiceRepositoryImpl @Inject constructor(
         )
 
         val response = api.miniMaxChat(
-            url = AIPlatform.MINIMAX.defaultEndpoint,
+            url = endpoint,
             authorization = "Bearer $apiKey",
             request = request
         )
@@ -210,6 +214,7 @@ class AIServiceRepositoryImpl @Inject constructor(
 
     private suspend fun sendGeminiMessage(
         apiKey: String,
+        endpoint: String,
         model: String,
         messages: List<ChatMessage>,
         temperature: Float,

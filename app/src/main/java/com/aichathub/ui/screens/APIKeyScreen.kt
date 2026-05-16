@@ -96,9 +96,7 @@ fun APIKeyScreen(
                             onEdit = { /* TODO: 实现编辑功能 */ },
                             onTest = {
                                 viewModel.testConnection(
-                                    key.platform,
-                                    key.apiKey.ifBlank { "test" },
-                                    key.getEndpoint(),
+                                    key,
                                     key.platform.defaultModel
                                 )
                             }
