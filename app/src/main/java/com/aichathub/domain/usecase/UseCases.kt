@@ -12,6 +12,7 @@ import com.aichathub.domain.repository.APIKeyRepository
 import com.aichathub.domain.repository.ChatSessionRepository
 import com.aichathub.domain.repository.SettingsRepository
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import javax.inject.Inject
 
 /**
@@ -34,23 +35,16 @@ class SendMessageUseCase @Inject constructor(
         val session = chatSessionRepository.getSession(sessionId)
             ?: return Result.failure(Exception("会话不存在"))
 
-        // 获取API密钥
-        val apiKeyInfoResult = apiKeyRepository.getActiveAPIKey()
-        if (apiKeyInfoResult == null) {
-            return Result.failure(Exception("请先配置API密钥"))
-        }
-        val apiKeyInfo: APIKeyInfo = apiKeyInfoResult
+        // 获取API密钥（从Flow中获取第一个值）
+        val apiKeyInfo = apiKeyRepository.getActiveAPIKey().first()
+            ?: return Result.failure(Exception("请先配置API密钥"))
 
         if (apiKeyInfo.platform != platform) {
             return Result.failure(Exception("当前激活的API密钥不匹配所选平台"))
         }
 
-        val keyId = apiKeyInfo.id
-        val decryptedKeyResult = apiKeyRepository.getDecryptedAPIKey(keyId)
-        if (decryptedKeyResult == null) {
-            return Result.failure(Exception("无法获取API密钥"))
-        }
-        val decryptedKey: String = decryptedKeyResult
+        val decryptedKey = apiKeyRepository.getDecryptedAPIKey(apiKeyInfo.id)
+            ?: return Result.failure(Exception("无法获取API密钥"))
 
         // 构建消息列表
         val messages = session.messages.toMutableList().apply {
@@ -102,8 +96,7 @@ class SendMessageUseCase @Inject constructor(
  * 创建新对话用例
  */
 class CreateSessionUseCase @Inject constructor(
-    private val chatSessionRepository: ChatSessionRepository,
-    private val settingsRepository: SettingsRepository
+    private val chatSessionRepository: ChatSessionRepository
 ) {
     suspend operator fun invoke(title: String = "新对话"): String {
         val session = ChatSession(
