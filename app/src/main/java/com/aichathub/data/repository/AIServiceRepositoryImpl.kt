@@ -198,7 +198,11 @@ class AIServiceRepositoryImpl @Inject constructor(
 
         if (response.isSuccessful) {
             val body = response.body()!!
-            val content = body.choices.firstOrNull()?.messages?.lastOrNull()?.content ?: ""
+            // 尝试从 messages 格式获取内容（MiniMax自定义格式）
+            val contentFromMessages = body.choices.firstOrNull()?.messages?.lastOrNull()?.content
+            // 尝试从 message 格式获取内容（OpenAI兼容格式）
+            val contentFromMessage = body.choices.firstOrNull()?.message?.content
+            val content = contentFromMessages ?: contentFromMessage ?: ""
             return SendMessageResponse(
                 content = content,
                 platform = AIPlatform.MINIMAX,

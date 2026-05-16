@@ -124,13 +124,15 @@ data class MiniMaxChatResponse(
     val choices: List<MiniMaxChoiceDto>,
     val usage: UsageDto? = null,
     val model: String? = null,
-    val objectStr: String? = null
+    val objectStr: String? = null,
+    val created: Long? = null
 )
 
 @Serializable
 data class MiniMaxChoiceDto(
-    val index: Int,
-    val messages: List<MessageDto>,
+    val index: Int = 0,
+    val messages: List<MessageDto>? = null,
+    val message: MessageDto? = null,  // 支持OpenAI格式
     @SerialName("finish_reason")
     val finishReason: String? = null
 )
