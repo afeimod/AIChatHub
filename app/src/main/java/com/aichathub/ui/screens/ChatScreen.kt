@@ -73,19 +73,23 @@ fun ChatScreen(
             )
         },
         bottomBar = {
+            // 使用 navigationBarsPadding() 确保不被系统导航栏遮挡
             MessageInput(
                 text = uiState.inputText,
                 onTextChange = viewModel::updateInputText,
                 onSend = viewModel::sendMessage,
-                enabled = !uiState.isLoading && uiState.activeAPIKey != null
+                enabled = !uiState.isLoading && uiState.activeAPIKey != null,
+                modifier = Modifier.navigationBarsPadding()
             )
-        }
+        },
+        containerColor = MaterialTheme.colorScheme.background
     ) { paddingValues ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
                 .background(MaterialTheme.colorScheme.background)
+                .imePadding() // 添加 IME padding 以防键盘遮挡
         ) {
             // 平台选择器
             Row(
