@@ -1,0 +1,143 @@
+name: Android CI/CD
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  release:
+    types: [ published ]
+
+env:
+  JAVA_VERSION: '17'
+  ANDROID_COMPILE_SDK: '34'
+  ANDROID_BUILD_TOOLS: '34.0.0'
+
+jobs:
+  build:
+    name: Build Debug APK
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+          cache: 'gradle'
+      
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v2
+      
+      - name: Grant execute permission for gradlew
+        run: chmod +x AIChatHub/gradlew
+      
+      - name: Cache Gradle packages
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('AIChatHub/**/*.gradle*', 'AIChatHub/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+      
+      - name: Build with Gradle
+        run: |
+          cd AIChatHub
+          ./gradlew assembleDebug --no-daemon --stacktrace
+      
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-apk
+          path: AIChatHub/app/build/outputs/apk/debug/*.apk
+          retention-days: 7
+  
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+          cache: 'gradle'
+      
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v2
+      
+      - name: Grant execute permission for gradlew
+        run: chmod +x AIChatHub/gradlew
+      
+      - name: Cache Gradle packages
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('AIChatHub/**/*.gradle*', 'AIChatHub/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+      
+      - name: Run unit tests
+        run: |
+          cd AIChatHub
+          ./gradlew test --no-daemon
+  
+  release:
+    name: Build Release APK
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release'
+    needs: [test]
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+          cache: 'gradle'
+      
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v2
+      
+      - name: Grant execute permission for gradlew
+        run: chmod +x AIChatHub/gradlew
+      
+      - name: Cache Gradle packages
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('AIChatHub/**/*.gradle*', 'AIChatHub/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+      
+      - name: Build Release APK
+        run: |
+          cd AIChatHub
+          ./gradlew assembleRelease --no-daemon --stacktrace
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+      
+      - name: Upload Release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release-apk
+          path: AIChatHub/app/build/outputs/apk/release/*.apk
+          retention-days: 30
