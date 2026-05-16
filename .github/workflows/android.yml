@@ -1,5 +1,6 @@
 name: Android CI/CD
 
+# 仅允许手动触发，任何代码变更（push、pull_request 等）都不会自动构建
 on:
   workflow_dispatch:
     inputs:
@@ -21,6 +22,7 @@ jobs:
   build:
     name: Build Debug APK
     runs-on: ubuntu-latest
+    # 仅在手动选择 debug 或未输入时执行（默认 debug）
     if: github.event.inputs.build_type == 'debug' || github.event.inputs.build_type == ''
     
     steps:
@@ -64,6 +66,7 @@ jobs:
   test:
     name: Run Tests
     runs-on: ubuntu-latest
+    # 测试任务始终运行（手动触发时）
     
     steps:
       - name: Checkout
@@ -99,6 +102,7 @@ jobs:
   release:
     name: Build Release APK
     runs-on: ubuntu-latest
+    # 仅在手动选择 release 时执行
     if: github.event.inputs.build_type == 'release'
     needs: [test]
     
