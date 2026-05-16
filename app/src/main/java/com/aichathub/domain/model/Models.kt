@@ -9,32 +9,61 @@ import kotlinx.serialization.Serializable
 enum class AIPlatform(
     val displayName: String,
     val defaultEndpoint: String,
-    val defaultModel: String
+    val defaultModel: String,
+    val models: List<String> = emptyList()
 ) {
     DEEPSEEK(
         displayName = "DeepSeek",
         defaultEndpoint = "https://api.deepseek.com/v1/chat/completions",
-        defaultModel = "deepseek-chat"
+        defaultModel = "deepseek-chat",
+        models = listOf(
+            "deepseek-chat",
+            "deepseek-coder",
+            "deepseek-reasoner"
+        )
     ),
     MINIMAX(
         displayName = "MiniMax",
         defaultEndpoint = "https://api.minimax.chat/v1/text/chatcompletion_v2",
-        defaultModel = "abab6.5s-chat"
+        defaultModel = "MiniMax-M2.7",
+        models = listOf(
+            "MiniMax-M2",
+            "MiniMax-M2.1",
+            "MiniMax-M2.1-highspeed",
+            "MiniMax-M2.5",
+            "MiniMax-M2.5-highspeed",
+            "MiniMax-M2.7",
+            "MiniMax-M2.7-highspeed"
+        )
     ),
     OPENAI(
         displayName = "OpenAI (GPT)",
         defaultEndpoint = "https://api.openai.com/v1/chat/completions",
-        defaultModel = "gpt-3.5-turbo"
+        defaultModel = "gpt-4o-mini",
+        models = listOf(
+            "gpt-4o-mini",
+            "gpt-4o",
+            "gpt-4-turbo",
+            "gpt-3.5-turbo"
+        )
     ),
     GEMINI(
         displayName = "Google Gemini",
-        defaultEndpoint = "https://generativelanguage.googleapis.com/v1/models",
-        defaultModel = "gemini-pro"
+        defaultEndpoint = "https://generativelanguage.googleapis.com/v1beta/models",
+        defaultModel = "gemini-2.0-flash",
+        models = listOf(
+            "gemini-2.0-flash",
+            "gemini-2.0-flash-exp",
+            "gemini-1.5-flash",
+            "gemini-1.5-flash-002",
+            "gemini-1.5-pro",
+            "gemini-1.5-pro-002"
+        )
     )
 }
 
 /**
- * API密钥信息
+ * API密钥信息（支持自定义端点）
  */
 @Serializable
 data class APIKeyInfo(
@@ -42,9 +71,12 @@ data class APIKeyInfo(
     val platform: AIPlatform,
     val apiKey: String,
     val name: String,
+    val customEndpoint: String? = null,  // 自定义API端点
     val isActive: Boolean = false,
     val createdAt: Long = System.currentTimeMillis()
-)
+) {
+    fun getEndpoint(): String = customEndpoint ?: platform.defaultEndpoint
+}
 
 /**
  * 模型配置
@@ -105,7 +137,8 @@ data class SendMessageRequest(
     val model: String,
     val messages: List<ChatMessage>,
     val temperature: Float = 0.7f,
-    val maxTokens: Int = 2048
+    val maxTokens: Int = 2048,
+    val endpoint: String? = null
 )
 
 /**
