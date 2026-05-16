@@ -114,7 +114,7 @@ fun SettingsScreen(
                         )
                     }
 
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+                    Divider(modifier = Modifier.padding(vertical = 12.dp))
 
                     // Temperature
                     Row(
@@ -147,7 +147,7 @@ fun SettingsScreen(
                         steps = 19
                     )
 
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+                    Divider(modifier = Modifier.padding(vertical = 12.dp))
 
                     // Max Tokens
                     Row(
