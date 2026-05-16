@@ -354,16 +354,16 @@ class AIServiceRepositoryImpl @Inject constructor(
         val imageData = imageAttachments.firstOrNull()?.base64Data
             ?: throw Exception("没有找到图片数据")
 
-        // 构建VLM请求 - 使用正确的MiniMax VLM格式
-        val requestMap = mapOf(
-            "prompt" to prompt,
-            "image_url" to "data:${userMessage.attachments.first().mimeType};base64,$imageData"
+        // 构建VLM请求 - 使用MiniMaxVLMRequest数据类
+        val vlmRequest = MiniMaxVLMRequest(
+            prompt = prompt,
+            imageUrl = "data:${userMessage.attachments.first().mimeType};base64,$imageData"
         )
 
         val response = api.miniMaxVLM(
             url = "https://api.minimax.chat/v1/coding_plan/vlm",
             authorization = "Bearer $apiKey",
-            request = requestMap
+            request = vlmRequest
         )
 
         if (response.isSuccessful) {
