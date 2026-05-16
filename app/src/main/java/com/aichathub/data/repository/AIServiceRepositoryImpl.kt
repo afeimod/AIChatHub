@@ -277,47 +277,19 @@ class AIServiceRepositoryImpl @Inject constructor(
         temperature: Float,
         maxTokens: Int
     ): SendMessageResponse {
-        // 直接传递消息内容
+        // 检查是否有图片附件，如果有则使用VLM端点
+        val hasImageAttachments = messages.any { msg ->
+            msg.attachments.any { it.type == AttachmentType.IMAGE }
+        }
+
+        if (hasImageAttachments) {
+            // 使用MiniMax VLM端点处理图片
+            return sendMiniMaxVLMMessage(apiKey, model, messages)
+        }
+
+        // 没有图片附件，使用标准文本API
         val miniMaxMessages = messages.map { chatMessage ->
-            if (chatMessage.attachments.isEmpty()) {
-                // 纯文本消息
-                MessageDto(chatMessage.role.name.lowercase(), chatMessage.content)
-            } else {
-                // 多模态消息：包含实际文件内容
-                val contentBuilder = StringBuilder()
-                if (chatMessage.content.isNotBlank()) {
-                    contentBuilder.append(chatMessage.content)
-                }
-                
-                // 添加附件的实际内容
-                chatMessage.attachments.forEach { attachment ->
-                    when (attachment.type) {
-                        AttachmentType.IMAGE -> {
-                            // 如果有base64数据，添加到消息中
-                            if (!attachment.base64Data.isNullOrBlank()) {
-                                contentBuilder.append("\n[image: ")
-                                contentBuilder.append(attachment.base64Data)
-                                contentBuilder.append("]")
-                            } else {
-                                contentBuilder.append("\n[image file: ${attachment.fileName}]")
-                            }
-                        }
-                        AttachmentType.PDF -> {
-                            contentBuilder.append("\n[pdf file: ${attachment.fileName}]")
-                        }
-                        AttachmentType.DOCUMENT -> {
-                            contentBuilder.append("\n[document file: ${attachment.fileName}]")
-                        }
-                        AttachmentType.ARCHIVE -> {
-                            contentBuilder.append("\n[archive file: ${attachment.fileName}]")
-                        }
-                        else -> {
-                            contentBuilder.append("\n[file: ${attachment.fileName}]")
-                        }
-                    }
-                }
-                MessageDto(chatMessage.role.name.lowercase(), contentBuilder.toString().trim())
-            }
+            MessageDto(chatMessage.role.name.lowercase(), chatMessage.content)
         }
 
         val request = MiniMaxChatRequest(
@@ -360,6 +332,51 @@ class AIServiceRepositoryImpl @Inject constructor(
             // 尝试读取错误信息
             val errorBody = response.errorBody()?.string() ?: ""
             throw Exception("API Error ${response.code()}: $errorBody")
+        }
+    }
+
+    /**
+     * 使用MiniMax VLM端点发送图片消息
+     */
+    private suspend fun sendMiniMaxVLMMessage(
+        apiKey: String,
+        model: String,
+        messages: List<ChatMessage>
+    ): SendMessageResponse {
+        // 获取最后一条用户消息及其附件
+        val userMessage = messages.filter { it.role == MessageRole.USER }.lastOrNull()
+            ?: throw Exception("没有找到用户消息")
+
+        val prompt = userMessage.content.ifBlank { "请分析这张图片" }
+
+        // 构建图片数据
+        val imageAttachments = userMessage.attachments.filter { it.type == AttachmentType.IMAGE }
+        val imageData = imageAttachments.firstOrNull()?.base64Data
+            ?: throw Exception("没有找到图片数据")
+
+        // 构建VLM请求 - 使用正确的MiniMax VLM格式
+        val requestMap = mapOf(
+            "prompt" to prompt,
+            "image_url" to "data:${userMessage.attachments.first().mimeType};base64,$imageData"
+        )
+
+        val response = api.miniMaxVLM(
+            url = "https://api.minimax.chat/v1/coding_plan/vlm",
+            authorization = "Bearer $apiKey",
+            request = requestMap
+        )
+
+        if (response.isSuccessful) {
+            val body = response.body()!!
+            val content = body.choices?.firstOrNull()?.message?.content ?: ""
+            return SendMessageResponse(
+                content = content,
+                platform = AIPlatform.MINIMAX,
+                model = model
+            )
+        } else {
+            val errorBody = response.errorBody()?.string() ?: ""
+            throw Exception("VLM API Error ${response.code()}: $errorBody")
         }
     }
 
