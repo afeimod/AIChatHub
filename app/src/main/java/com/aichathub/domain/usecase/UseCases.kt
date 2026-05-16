@@ -1,6 +1,12 @@
 package com.aichathub.domain.usecase
 
-import com.aichathub.domain.model.*
+import com.aichathub.domain.model.AIPlatform
+import com.aichathub.domain.model.APIKeyInfo
+import com.aichathub.domain.model.AppSettings
+import com.aichathub.domain.model.ChatMessage
+import com.aichathub.domain.model.ChatSession
+import com.aichathub.domain.model.MessageRole
+import com.aichathub.domain.model.SendMessageResponse
 import com.aichathub.domain.repository.AIServiceRepository
 import com.aichathub.domain.repository.APIKeyRepository
 import com.aichathub.domain.repository.ChatSessionRepository
@@ -29,15 +35,22 @@ class SendMessageUseCase @Inject constructor(
             ?: return Result.failure(Exception("会话不存在"))
 
         // 获取API密钥
-        val apiKeyInfo = apiKeyRepository.getActiveAPIKey()
-            ?: return Result.failure(Exception("请先配置API密钥"))
+        val apiKeyInfoResult = apiKeyRepository.getActiveAPIKey()
+        if (apiKeyInfoResult == null) {
+            return Result.failure(Exception("请先配置API密钥"))
+        }
+        val apiKeyInfo: APIKeyInfo = apiKeyInfoResult
 
         if (apiKeyInfo.platform != platform) {
             return Result.failure(Exception("当前激活的API密钥不匹配所选平台"))
         }
 
-        val decryptedKey = apiKeyRepository.getDecryptedAPIKey(apiKeyInfo.id)
-            ?: return Result.failure(Exception("无法获取API密钥"))
+        val keyId = apiKeyInfo.id
+        val decryptedKeyResult = apiKeyRepository.getDecryptedAPIKey(keyId)
+        if (decryptedKeyResult == null) {
+            return Result.failure(Exception("无法获取API密钥"))
+        }
+        val decryptedKey: String = decryptedKeyResult
 
         // 构建消息列表
         val messages = session.messages.toMutableList().apply {
@@ -93,10 +106,9 @@ class CreateSessionUseCase @Inject constructor(
     private val settingsRepository: SettingsRepository
 ) {
     suspend operator fun invoke(title: String = "新对话"): String {
-        val settings = settingsRepository.getSettings()
         val session = ChatSession(
             title = title,
-            platform = settings.hashCode().let { AIPlatform.DEEPSEEK }, // Default platform
+            platform = AIPlatform.DEEPSEEK,
             model = AIPlatform.DEEPSEEK.defaultModel
         )
         return chatSessionRepository.createSession(session)
