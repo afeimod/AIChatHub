@@ -278,18 +278,20 @@ class AIServiceRepositoryImpl @Inject constructor(
         temperature: Float,
         maxTokens: Int
     ): SendMessageResponse {
-        // 获取最后一条用户消息，检查是否有图片附件
+        // 获取最后一条用户消息，检查是否有附件
         val lastUserMessage = messages.filter { it.role == MessageRole.USER }.lastOrNull()
         val hasImageInLastMessage = lastUserMessage?.attachments?.any { it.type == AttachmentType.IMAGE } == true
+        val hasOtherAttachments = lastUserMessage?.attachments?.any { it.type != AttachmentType.IMAGE } == true
 
         if (hasImageInLastMessage) {
             // 仅当最后一条用户消息包含图片时，才使用VLM端点
             return sendMiniMaxVLMMessage(apiKey, model, messages)
         }
 
-        // 没有图片附件，使用标准文本API
+        // 构建消息，包含附件信息
         val miniMaxMessages = messages.map { chatMessage ->
-            MessageDto(chatMessage.role.name.lowercase(), chatMessage.content)
+            val content = buildMessageContent(chatMessage)
+            MessageDto(chatMessage.role.name.lowercase(), content)
         }
 
         val request = MiniMaxChatRequest(
@@ -336,6 +338,34 @@ class AIServiceRepositoryImpl @Inject constructor(
     }
 
     /**
+     * 构建消息内容，包含附件信息的文本描述
+     */
+    private fun buildMessageContent(chatMessage: ChatMessage): String {
+        var content = chatMessage.content
+        
+        // 如果有附件，添加附件信息
+        if (chatMessage.attachments.isNotEmpty()) {
+            val attachmentDescriptions = chatMessage.attachments.map { attachment ->
+                when (attachment.type) {
+                    AttachmentType.IMAGE -> "[用户发送了图片: ${attachment.fileName}]"
+                    AttachmentType.PDF -> "[用户发送了PDF文档: ${attachment.fileName}]"
+                    AttachmentType.DOCUMENT -> "[用户发送了文档: ${attachment.fileName}]"
+                    AttachmentType.ARCHIVE -> "[用户发送了压缩包: ${attachment.fileName}]"
+                    AttachmentType.OTHER -> "[用户发送了文件: ${attachment.fileName}]"
+                }
+            }.joinToString("\n")
+            
+            if (content.isNotBlank()) {
+                content = "$attachmentDescriptions\n\n用户消息: $content"
+            } else {
+                content = attachmentDescriptions
+            }
+        }
+        
+        return content
+    }
+
+    /**
      * 使用MiniMax VLM端点发送图片消息
      */
     private suspend fun sendMiniMaxVLMMessage(
@@ -345,38 +375,76 @@ class AIServiceRepositoryImpl @Inject constructor(
     ): SendMessageResponse {
         // 获取最后一条用户消息及其附件
         val userMessage = messages.filter { it.role == MessageRole.USER }.lastOrNull()
-            ?: throw Exception("没有找到用户消息")
-
-        val prompt = userMessage.content.ifBlank { "请分析这张图片" }
-
-        // 构建图片数据
-        val imageAttachments = userMessage.attachments.filter { it.type == AttachmentType.IMAGE }
-        val imageData = imageAttachments.firstOrNull()?.base64Data
-            ?: throw Exception("没有找到图片数据")
-
-        // 构建VLM请求 - 使用MiniMaxVLMRequest数据类
-        val vlmRequest = MiniMaxVLMRequest(
-            prompt = prompt,
-            imageUrl = "data:${userMessage.attachments.first().mimeType};base64,$imageData"
-        )
-
-        val response = api.miniMaxVLM(
-            url = "https://api.minimax.chat/v1/coding_plan/vlm",
-            authorization = "Bearer $apiKey",
-            request = vlmRequest
-        )
-
-        if (response.isSuccessful) {
-            val body = response.body()!!
-            val content = body.choices?.firstOrNull()?.message?.content ?: ""
-            return SendMessageResponse(
-                content = content,
+            ?: return SendMessageResponse(
+                content = "错误：没有找到用户消息",
                 platform = AIPlatform.MINIMAX,
                 model = model
             )
-        } else {
-            val errorBody = response.errorBody()?.string() ?: ""
-            throw Exception("VLM API Error ${response.code()}: $errorBody")
+
+        val prompt = userMessage.content.ifBlank { "请分析这张图片" }
+
+        // 获取图片数据
+        val imageAttachments = userMessage.attachments.filter { it.type == AttachmentType.IMAGE }
+        val firstImage = imageAttachments.firstOrNull()
+
+        if (firstImage == null || firstImage.base64Data.isNullOrBlank()) {
+            return SendMessageResponse(
+                content = "错误：没有找到图片数据，请确保图片已正确上传",
+                platform = AIPlatform.MINIMAX,
+                model = model
+            )
+        }
+
+        // 构建图片数据 - 尝试不同的格式
+        val imageData = firstImage.base64Data
+        val mimeType = firstImage.mimeType
+
+        // 构建VLM请求 - image_url 可以是URL或base64数据
+        val vlmRequest = MiniMaxVLMRequest(
+            prompt = prompt,
+            imageUrl = "data:$mimeType;base64,$imageData"
+        )
+
+        return try {
+            val response = api.miniMaxVLM(
+                url = "https://api.minimax.chat/v1/coding_plan/vlm",
+                authorization = "Bearer $apiKey",
+                request = vlmRequest
+            )
+
+            if (response.isSuccessful) {
+                val body = response.body()!!
+                val content = body.choices?.firstOrNull()?.message?.content
+                    ?: body.base_resp?.status_msg
+                    ?: "MiniMax VLM暂不支持此图片，请尝试使用DeepSeek或OpenAI平台"
+                SendMessageResponse(
+                    content = content,
+                    platform = AIPlatform.MINIMAX,
+                    model = model
+                )
+            } else {
+                val errorBody = response.errorBody()?.string() ?: ""
+                val errorMsg = when {
+                    errorBody.contains("quota") || errorBody.contains("限额") ->
+                        "MiniMax VLM额度已用尽，请明日再试或使用其他平台"
+                    errorBody.contains("unauthorized") || errorBody.contains("权限") ->
+                        "MiniMax VLM权限不足，请检查API密钥是否正确"
+                    else ->
+                        "MiniMax VLM暂时不可用（错误码: ${response.code()}），请尝试使用DeepSeek或OpenAI平台解析图片"
+                }
+                SendMessageResponse(
+                    content = errorMsg,
+                    platform = AIPlatform.MINIMAX,
+                    model = model
+                )
+            }
+        } catch (e: Exception) {
+            // VLM调用失败时返回友好的错误消息，而不是抛出异常
+            SendMessageResponse(
+                content = "MiniMax VLM暂时不可用，请尝试使用DeepSeek或OpenAI平台解析图片",
+                platform = AIPlatform.MINIMAX,
+                model = model
+            )
         }
     }
 
