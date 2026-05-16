@@ -1,12 +1,6 @@
 name: Android CI/CD
 
 on:
-  push:
-    branches: [ main, master ]
-  pull_request:
-    branches: [ main, master ]
-  release:
-    types: [ published ]
   workflow_dispatch:
     inputs:
       build_type:
@@ -27,6 +21,7 @@ jobs:
   build:
     name: Build Debug APK
     runs-on: ubuntu-latest
+    if: github.event.inputs.build_type == 'debug' || github.event.inputs.build_type == ''
     
     steps:
       - name: Checkout
@@ -56,12 +51,10 @@ jobs:
             ${{ runner.os }}-gradle-
       
       - name: Build Debug APK
-        if: github.event_name != 'workflow_dispatch' || github.event.inputs.build_type == 'debug'
         run: |
           ./gradlew assembleDebug --no-daemon --stacktrace
       
       - name: Upload Debug APK
-        if: github.event_name != 'workflow_dispatch' || github.event.inputs.build_type == 'debug'
         uses: actions/upload-artifact@v4
         with:
           name: app-debug-apk
@@ -106,7 +99,7 @@ jobs:
   release:
     name: Build Release APK
     runs-on: ubuntu-latest
-    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.event.inputs.build_type == 'release')
+    if: github.event.inputs.build_type == 'release'
     needs: [test]
     
     steps:
