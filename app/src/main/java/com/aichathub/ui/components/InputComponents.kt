@@ -205,7 +205,7 @@ fun AttachmentImagePreview(
             .clickable { /* 查看大图 */ }
     ) {
         AsyncImage(
-            model = attachment.uri,
+            model = attachment.localPath ?: "",
             contentDescription = attachment.fileName,
             modifier = Modifier.fillMaxSize(),
             contentScale = ContentScale.Crop

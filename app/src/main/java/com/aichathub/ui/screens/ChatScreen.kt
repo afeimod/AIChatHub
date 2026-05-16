@@ -9,15 +9,12 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -38,10 +35,9 @@ fun ChatScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
-    val context = LocalContext.current
     
-    // 侧边栏状态
-    var showDrawer by remember { mutableStateOf(false) }
+    // 会话历史对话框状态
+    var showSessionDialog by remember { mutableStateOf(false) }
 
     // 文件选择器
     val documentLauncher = rememberLauncherForActivityResult(
@@ -83,7 +79,7 @@ fun ChatScreen(
                     }
                 },
                 navigationIcon = {
-                    IconButton(onClick = { showDrawer = true }) {
+                    IconButton(onClick = { showSessionDialog = true }) {
                         Icon(Icons.Default.Menu, contentDescription = "历史记录")
                     }
                 },
@@ -113,20 +109,6 @@ fun ChatScreen(
                 attachments = uiState.pendingAttachments,
                 onRemoveAttachment = { viewModel.removeAttachment(it) },
                 modifier = Modifier.navigationBarsPadding()
-            )
-        },
-        drawerContent = {
-            SessionDrawer(
-                sessions = uiState.allSessions,
-                currentSessionId = uiState.currentSession?.id,
-                onSessionSelect = { session ->
-                    viewModel.selectSession(session)
-                    showDrawer = false
-                },
-                onSessionDelete = { sessionId ->
-                    viewModel.deleteSession(sessionId)
-                },
-                onClose = { showDrawer = false }
             )
         },
         containerColor = MaterialTheme.colorScheme.background
@@ -243,40 +225,45 @@ fun ChatScreen(
             }
         )
     }
+
+    // 会话历史对话框
+    if (showSessionDialog) {
+        SessionHistoryDialog(
+            sessions = uiState.allSessions,
+            currentSessionId = uiState.currentSession?.id,
+            onSessionSelect = { session ->
+                viewModel.selectSession(session)
+                showSessionDialog = false
+            },
+            onSessionDelete = { sessionId ->
+                viewModel.deleteSession(sessionId)
+            },
+            onDismiss = { showSessionDialog = false }
+        )
+    }
 }
 
 /**
- * 历史会话抽屉组件
+ * 会话历史对话框
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SessionDrawer(
+fun SessionHistoryDialog(
     sessions: List<ChatSession>,
     currentSessionId: String?,
     onSessionSelect: (ChatSession) -> Unit,
     onSessionDelete: (String) -> Unit,
-    onClose: () -> Unit
+    onDismiss: () -> Unit
 ) {
-    ModalDrawerSheet {
-        Column(
-            modifier = Modifier.fillMaxSize()
-        ) {
-            // 抽屉标题
-            TopAppBar(
-                title = { Text("历史对话") },
-                navigationIcon = {
-                    IconButton(onClick = onClose) {
-                        Icon(Icons.Default.Close, contentDescription = "关闭")
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer
-                )
-            )
-
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("历史对话") },
+        text = {
             if (sessions.isEmpty()) {
                 Box(
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(200.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
@@ -287,8 +274,9 @@ fun SessionDrawer(
                 }
             } else {
                 LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(vertical = 8.dp)
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 400.dp)
                 ) {
                     items(sessions) { session ->
                         SessionItem(
@@ -300,8 +288,13 @@ fun SessionDrawer(
                     }
                 }
             }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("关闭")
+            }
         }
-    }
+    )
 }
 
 /**
