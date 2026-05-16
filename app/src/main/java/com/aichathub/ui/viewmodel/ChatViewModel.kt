@@ -203,6 +203,7 @@ class ChatViewModel @Inject constructor(
         return when {
             mimeType.startsWith("image/") -> AttachmentType.IMAGE
             mimeType == "application/pdf" -> AttachmentType.PDF
+            mimeType.contains("archive") || mimeType.contains("zip") || mimeType.contains("rar") || mimeType.contains("compressed") -> AttachmentType.ARCHIVE
             mimeType.contains("document") || mimeType.contains("text") -> AttachmentType.DOCUMENT
             else -> AttachmentType.OTHER
         }

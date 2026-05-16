@@ -50,15 +50,58 @@ fun MessageInputWithAttachment(
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 12.dp)
         ) {
-            // 显示已添加的附件
-            if (attachments.isNotEmpty()) {
+            // 显示图片附件预览（如果是图片）
+            val imageAttachments = attachments.filter { it.type == AttachmentType.IMAGE }
+            if (imageAttachments.isNotEmpty()) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(bottom = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    attachments.forEach { attachment ->
+                    imageAttachments.forEach { attachment ->
+                        // 显示图片缩略图预览
+                        Box(
+                            modifier = Modifier
+                                .size(80.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                        ) {
+                            AsyncImage(
+                                model = attachment.localPath ?: attachment.base64Data?.let { "data:${attachment.mimeType};base64,$it" } ?: "",
+                                contentDescription = attachment.fileName,
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop
+                            )
+                            // 移除按钮
+                            IconButton(
+                                onClick = { onRemoveAttachment(attachment) },
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .size(24.dp)
+                                    .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "移除",
+                                    modifier = Modifier.size(14.dp),
+                                    tint = Color.White
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 显示其他附件（非图片）
+            val otherAttachments = attachments.filter { it.type != AttachmentType.IMAGE }
+            if (otherAttachments.isNotEmpty()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    otherAttachments.forEach { attachment ->
                         AttachmentChip(
                             attachment = attachment,
                             onRemove = { onRemoveAttachment(attachment) }
@@ -160,6 +203,7 @@ fun AttachmentChip(
                     AttachmentType.IMAGE -> Icons.Default.Image
                     AttachmentType.PDF -> Icons.Default.PictureAsPdf
                     AttachmentType.DOCUMENT -> Icons.Default.Description
+                    AttachmentType.ARCHIVE -> Icons.Default.Archive
                     AttachmentType.OTHER -> Icons.Default.InsertDriveFile
                 },
                 contentDescription = null,
@@ -244,7 +288,8 @@ fun AttachmentTypeDialog(
     onDismiss: () -> Unit,
     onSelectImage: () -> Unit,
     onSelectDocument: () -> Unit,
-    onSelectCamera: () -> Unit
+    onSelectCamera: () -> Unit,
+    onSelectArchive: () -> Unit = {}
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -270,6 +315,16 @@ fun AttachmentTypeDialog(
                     },
                     modifier = Modifier.clickable {
                         onSelectDocument()
+                        onDismiss()
+                    }
+                )
+                ListItem(
+                    headlineContent = { Text("压缩包 (ZIP/RAR)") },
+                    leadingContent = {
+                        Icon(Icons.Default.Archive, contentDescription = null)
+                    },
+                    modifier = Modifier.clickable {
+                        onSelectArchive()
                         onDismiss()
                     }
                 )

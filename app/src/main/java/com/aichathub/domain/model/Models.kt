@@ -98,6 +98,7 @@ enum class AttachmentType {
     IMAGE,
     PDF,
     DOCUMENT,
+    ARCHIVE,
     OTHER
 }
 
