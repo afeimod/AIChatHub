@@ -53,15 +53,19 @@ class AIServiceRepositoryImpl @Inject constructor(
 
             when (platform) {
                 AIPlatform.DEEPSEEK, AIPlatform.OPENAI -> {
-                    val request = OpenAIChatRequest(
-                        model = model,
-                        messages = testMessages,
-                        maxTokens = 5
+                    // 使用Map格式进行测试连接
+                    val requestMap = mapOf(
+                        "model" to model,
+                        "messages" to listOf(mapOf(
+                            "role" to "user",
+                            "content" to "Hi"
+                        )),
+                        "max_tokens" to 5
                     )
                     val response = api.chatCompletion(
                         url = endpoint,
                         authorization = "Bearer $apiKey",
-                        request = request
+                        request = requestMap
                     )
                     if (response.isSuccessful) Result.success(true)
                     else Result.failure(Exception("Connection failed: ${response.code()}"))

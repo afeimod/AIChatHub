@@ -86,22 +86,52 @@ data class ModelConfig(
     val platform: AIPlatform,
     val model: String,
     val temperature: Float = 0.7f,
-    val maxTokens: Int = 2048,
+    val maxTokens: Int = 4096,
     val topP: Float = 1.0f
 )
 
 /**
- * 对话消息
+ * 附件类型枚举
  */
 @Serializable
-data class ChatMessage(
+enum class AttachmentType {
+    IMAGE,
+    PDF,
+    DOCUMENT,
+    OTHER
+}
+
+/**
+ * 消息附件数据类
+ */
+@Serializable
+data class MessageAttachment(
     val id: String = java.util.UUID.randomUUID().toString(),
-    val role: MessageRole,
-    val content: String,
-    val timestamp: Long = System.currentTimeMillis(),
-    val platform: AIPlatform? = null,
-    val model: String? = null
-)
+    val fileName: String,
+    val mimeType: String,
+    val size: Long,
+    val type: AttachmentType,
+    val localPath: String? = null,  // 本地文件路径
+    val base64Data: String? = null, // Base64编码数据（用于小文件）
+    val url: String? = null          // 远程URL（用于已上传的文件）
+) {
+    companion object {
+        fun fromMimeType(mimeType: String, fileName: String, size: Long): MessageAttachment {
+            val type = when {
+                mimeType.startsWith("image/") -> AttachmentType.IMAGE
+                mimeType == "application/pdf" -> AttachmentType.PDF
+                mimeType.contains("document") || mimeType.contains("text") -> AttachmentType.DOCUMENT
+                else -> AttachmentType.OTHER
+            }
+            return MessageAttachment(
+                fileName = fileName,
+                mimeType = mimeType,
+                size = size,
+                type = type
+            )
+        }
+    }
+}
 
 /**
  * 消息角色
@@ -112,6 +142,20 @@ enum class MessageRole {
     ASSISTANT,
     SYSTEM
 }
+
+/**
+ * 对话消息（支持多模态附件）
+ */
+@Serializable
+data class ChatMessage(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val role: MessageRole,
+    val content: String,
+    val timestamp: Long = System.currentTimeMillis(),
+    val platform: AIPlatform? = null,
+    val model: String? = null,
+    val attachments: List<MessageAttachment> = emptyList()  // 新增：附件列表
+)
 
 /**
  * 对话会话
@@ -137,7 +181,7 @@ data class SendMessageRequest(
     val model: String,
     val messages: List<ChatMessage>,
     val temperature: Float = 0.7f,
-    val maxTokens: Int = 2048,
+    val maxTokens: Int = 4096,
     val endpoint: String? = null
 )
 
@@ -163,6 +207,22 @@ data class TokenUsage(
 )
 
 /**
+ * 多模态消息内容项
+ */
+@Serializable
+sealed class ContentItem {
+    @Serializable
+    data class TextContent(val text: String) : ContentItem()
+    
+    @Serializable
+    data class ImageContent(
+        val url: String? = null,        // 图片URL或base64
+        val base64: String? = null,     // Base64数据
+        val detail: String = "low"      // 图片细节级别: low, high, auto
+    ) : ContentItem()
+}
+
+/**
  * 应用设置
  */
 @Serializable
@@ -171,5 +231,6 @@ data class AppSettings(
     val enableStreamResponse: Boolean = true,
     val defaultPlatform: AIPlatform = AIPlatform.DEEPSEEK,
     val defaultTemperature: Float = 0.7f,
-    val defaultMaxTokens: Int = 2048
+    val defaultMaxTokens: Int = 4096,
+    val enableMultimodal: Boolean = true  // 新增：启用多模态
 )

@@ -5,6 +5,7 @@ import com.aichathub.domain.model.APIKeyInfo
 import com.aichathub.domain.model.AppSettings
 import com.aichathub.domain.model.ChatMessage
 import com.aichathub.domain.model.ChatSession
+import com.aichathub.domain.model.MessageAttachment
 import com.aichathub.domain.model.MessageRole
 import com.aichathub.domain.model.SendMessageResponse
 import com.aichathub.domain.repository.AIServiceRepository
