@@ -93,10 +93,12 @@ fun APIKeyScreen(
                             apiKey = key,
                             onSetActive = { viewModel.setActiveAPIKey(key.id) },
                             onDelete = { viewModel.deleteAPIKey(key.id) },
+                            onEdit = { /* TODO: 实现编辑功能 */ },
                             onTest = {
                                 viewModel.testConnection(
                                     key.platform,
-                                    key.apiKey.ifBlank { "test" }, // 实际密钥需要从存储获取
+                                    key.apiKey.ifBlank { "test" },
+                                    key.getEndpoint(),
                                     key.platform.defaultModel
                                 )
                             }
@@ -110,8 +112,8 @@ fun APIKeyScreen(
         if (uiState.showAddDialog) {
             AddAPIKeyDialog(
                 onDismiss = { viewModel.hideAddDialog() },
-                onConfirm = { platform, apiKey, name ->
-                    viewModel.addAPIKey(platform, apiKey, name)
+                onConfirm = { platform, apiKey, name, customEndpoint ->
+                    viewModel.addAPIKey(platform, apiKey, name, customEndpoint)
                 },
                 isLoading = uiState.isLoading
             )
@@ -132,6 +134,7 @@ fun APIKeyCard(
     apiKey: APIKeyInfo,
     onSetActive: () -> Unit,
     onDelete: () -> Unit,
+    onEdit: () -> Unit,
     onTest: () -> Unit
 ) {
     var showDeleteDialog by remember { mutableStateOf(false) }
@@ -168,6 +171,14 @@ fun APIKeyCard(
                         style = MaterialTheme.typography.bodySmall,
                         color = TextSecondary
                     )
+                    // 显示自定义端点（如果有）
+                    apiKey.customEndpoint?.let { endpoint ->
+                        Text(
+                            text = endpoint,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = PrimaryBlue
+                        )
+                    }
                 }
                 if (apiKey.isActive) {
                     AssistChip(
@@ -249,12 +260,13 @@ fun APIKeyCard(
 @Composable
 fun AddAPIKeyDialog(
     onDismiss: () -> Unit,
-    onConfirm: (AIPlatform, String, String) -> Unit,
+    onConfirm: (AIPlatform, String, String, String?) -> Unit,
     isLoading: Boolean
 ) {
     var selectedPlatform by remember { mutableStateOf(AIPlatform.DEEPSEEK) }
     var apiKey by remember { mutableStateOf("") }
     var name by remember { mutableStateOf("") }
+    var customEndpoint by remember { mutableStateOf("") }
     var expanded by remember { mutableStateOf(false) }
 
     AlertDialog(
@@ -262,7 +274,7 @@ fun AddAPIKeyDialog(
         title = { Text("添加API密钥") },
         text = {
             Column(
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 // 平台选择
                 ExposedDropdownMenuBox(
@@ -318,6 +330,22 @@ fun AddAPIKeyDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
 
+                // 自定义端点（可选）
+                OutlinedTextField(
+                    value = customEndpoint,
+                    onValueChange = { customEndpoint = it },
+                    label = { Text("自定义API端点（可选）") },
+                    placeholder = { Text(selectedPlatform.defaultEndpoint) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    supportingText = {
+                        Text(
+                            text = "留空则使用默认端点: ${selectedPlatform.defaultEndpoint}",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                )
+
                 // 名称输入
                 OutlinedTextField(
                     value = name,
@@ -331,7 +359,10 @@ fun AddAPIKeyDialog(
         },
         confirmButton = {
             Button(
-                onClick = { onConfirm(selectedPlatform, apiKey, name) },
+                onClick = {
+                    val endpoint = customEndpoint.ifBlank { null }
+                    onConfirm(selectedPlatform, apiKey, name, endpoint)
+                },
                 enabled = apiKey.isNotBlank() && !isLoading
             ) {
                 if (isLoading) {
