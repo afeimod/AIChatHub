@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">AI Chat Hub</string>
+    <string name="platform_deepseek">DeepSeek</string>
+    <string name="platform_minimax">MiniMax</string>
+    <string name="platform_openai">OpenAI (GPT)</string>
+    <string name="platform_gemini">Google Gemini</string>
+    <string name="input_hint">输入您的消息...</string>
+    <string name="send">发送</string>
+    <string name="new_chat">新对话</string>
+    <string name="settings">设置</string>
+    <string name="api_keys">API密钥</string>
+    <string name="add_api_key">添加API密钥</string>
+    <string name="delete_confirm">删除确认</string>
+    <string name="cancel">取消</string>
+    <string name="confirm">确认</string>
+    <string name="dark_mode">暗色模式</string>
+    <string name="clear_history">清空历史</string>
+    <string name="no_messages">暂无消息</string>
+    <string name="start_chat">开始与AI对话</string>
+    <string name="select_platform">请先配置API密钥</string>
+</resources>
