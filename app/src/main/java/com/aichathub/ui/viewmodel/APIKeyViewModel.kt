@@ -60,9 +60,19 @@ class APIKeyViewModel @Inject constructor(
         _uiState.update { it.copy(showEditDialog = false, editingKey = null) }
     }
 
-    fun addAPIKey(platform: AIPlatform, apiKey: String, name: String) {
+    fun addAPIKey(platform: AIPlatform, apiKey: String, name: String, customEndpoint: String? = null) {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
+
+            // 创建带自定义端点的 APIKeyInfo
+            val keyInfo = APIKeyInfo(
+                id = java.util.UUID.randomUUID().toString(),
+                platform = platform,
+                apiKey = apiKey,
+                name = name.ifBlank { platform.displayName },
+                customEndpoint = customEndpoint
+            )
+
             val result = addAPIKeyUseCase(platform, apiKey, name)
             result.fold(
                 onSuccess = {
@@ -108,13 +118,13 @@ class APIKeyViewModel @Inject constructor(
         }
     }
 
-    fun testConnection(platform: AIPlatform, apiKey: String, model: String) {
+    fun testConnection(platform: AIPlatform, apiKey: String, endpoint: String, model: String) {
         viewModelScope.launch {
             _uiState.update { it.copy(isTesting = true, testResult = null) }
             val result = testConnectionUseCase(
                 platform = platform,
                 apiKey = apiKey,
-                endpoint = platform.defaultEndpoint,
+                endpoint = endpoint,
                 model = model
             )
             result.fold(

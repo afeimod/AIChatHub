@@ -72,12 +72,15 @@ class ChatViewModel @Inject constructor(
             // 加载所有会话
             chatSessionRepository.getAllSessions().collect { sessions ->
                 _uiState.update { it.copy(allSessions = sessions) }
-                // 如果没有当前会话，创建新会话
+                // 如果没有当前会话且有会话列表，选择第一个
                 if (_uiState.value.currentSession == null && sessions.isNotEmpty()) {
+                    val firstSession = sessions.first()
                     _uiState.update {
                         it.copy(
-                            currentSession = sessions.first(),
-                            messages = sessions.first().messages
+                            currentSession = firstSession,
+                            messages = firstSession.messages,
+                            selectedPlatform = firstSession.platform,
+                            selectedModel = firstSession.model
                         )
                     }
                 }
@@ -135,11 +138,22 @@ class ChatViewModel @Inject constructor(
         val text = _uiState.value.inputText.trim()
         if (text.isBlank()) return
 
-        val session = _uiState.value.currentSession ?: run {
+        val session = _uiState.value.currentSession
+        if (session == null) {
             createNewSession()
+            // 等待新会话创建完成后再发送
+            viewModelScope.launch {
+                // 等待一下让新会话创建
+                kotlinx.coroutines.delay(100)
+                sendMessageActual(text)
+            }
             return
         }
 
+        sendMessageActual(text)
+    }
+
+    private fun sendMessageActual(text: String) {
         viewModelScope.launch {
             _uiState.update {
                 it.copy(
@@ -159,6 +173,8 @@ class ChatViewModel @Inject constructor(
 
             val updatedMessages = _uiState.value.messages + userMessage
             _uiState.update { it.copy(messages = updatedMessages) }
+
+            val session = _uiState.value.currentSession ?: return@launch
 
             val result = sendMessageUseCase(
                 sessionId = session.id,
@@ -216,11 +232,6 @@ class ChatViewModel @Inject constructor(
     }
 
     fun getAvailableModels(platform: AIPlatform): List<String> {
-        return when (platform) {
-            AIPlatform.DEEPSEEK -> listOf("deepseek-chat", "deepseek-coder")
-            AIPlatform.OPENAI -> listOf("gpt-4", "gpt-4-turbo", "gpt-3.5-turbo")
-            AIPlatform.MINIMAX -> listOf("abab6.5s-chat", "abab5.5s-chat")
-            AIPlatform.GEMINI -> listOf("gemini-pro", "gemini-pro-vision")
-        }
+        return platform.models.ifEmpty { listOf(platform.defaultModel) }
     }
 }
