@@ -278,13 +278,12 @@ class AIServiceRepositoryImpl @Inject constructor(
         temperature: Float,
         maxTokens: Int
     ): SendMessageResponse {
-        // 检查是否有图片附件，如果有则使用VLM端点
-        val hasImageAttachments = messages.any { msg ->
-            msg.attachments.any { it.type == AttachmentType.IMAGE }
-        }
+        // 获取最后一条用户消息，检查是否有图片附件
+        val lastUserMessage = messages.filter { it.role == MessageRole.USER }.lastOrNull()
+        val hasImageInLastMessage = lastUserMessage?.attachments?.any { it.type == AttachmentType.IMAGE } == true
 
-        if (hasImageAttachments) {
-            // 使用MiniMax VLM端点处理图片
+        if (hasImageInLastMessage) {
+            // 仅当最后一条用户消息包含图片时，才使用VLM端点
             return sendMiniMaxVLMMessage(apiKey, model, messages)
         }
 
