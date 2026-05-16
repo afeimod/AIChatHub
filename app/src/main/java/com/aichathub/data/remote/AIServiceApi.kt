@@ -39,7 +39,42 @@ interface AIServiceApi {
         @Header("Authorization") authorization: String,
         @Body request: MiniMaxChatRequest
     ): Response<MiniMaxChatResponse>
+
+    /**
+     * MiniMax VLM (Vision Language Model) 请求
+     * 用于处理图片等多模态输入
+     */
+    @POST
+    suspend fun miniMaxVLM(
+        @Url url: String,
+        @Header("Authorization") authorization: String,
+        @Body request: Map<String, @JvmSuppressWildcards Any>
+    ): Response<MiniMaxVLMResponse>
 }
+
+/**
+ * MiniMax VLM 响应模型
+ */
+@kotlinx.serialization.Serializable
+data class MiniMaxVLMResponse(
+    val id: String? = null,
+    val choices: List<MiniMaxVLMChoice>? = null,
+    val created: Long? = null
+)
+
+@kotlinx.serialization.Serializable
+data class MiniMaxVLMChoice(
+    val index: Int = 0,
+    val message: MiniMaxVLMMessage? = null,
+    @kotlinx.serialization.SerialName("finish_reason")
+    val finishReason: String? = null
+)
+
+@kotlinx.serialization.Serializable
+data class MiniMaxVLMMessage(
+    val role: String = "assistant",
+    val content: String = ""
+)
 
 /**
  * API响应包装类
