@@ -277,30 +277,43 @@ class AIServiceRepositoryImpl @Inject constructor(
         temperature: Float,
         maxTokens: Int
     ): SendMessageResponse {
-        // 构建MiniMax消息，尝试支持多模态
+        // 直接传递消息内容，让API处理附件
+        // MiniMax API 期望的消息格式
         val miniMaxMessages = messages.map { chatMessage ->
             if (chatMessage.attachments.isEmpty()) {
                 // 纯文本消息
                 MessageDto(chatMessage.role.name.lowercase(), chatMessage.content)
             } else {
-                // 多模态消息：构建包含附件信息的文本
+                // 多模态消息：包含实际文件内容
                 val contentBuilder = StringBuilder()
                 if (chatMessage.content.isNotBlank()) {
-                    contentBuilder.append(chatMessage.content).append("\n")
+                    contentBuilder.append(chatMessage.content)
                 }
-                // 添加附件信息
+                
+                // 添加附件的实际内容
                 chatMessage.attachments.forEach { attachment ->
                     when (attachment.type) {
                         AttachmentType.IMAGE -> {
-                            // 尝试将图片作为base64发送
+                            // 如果有base64数据，添加到消息中
                             if (!attachment.base64Data.isNullOrBlank()) {
-                                contentBuilder.append("[图片: base64编码数据]")
+                                contentBuilder.append("\n[image: ")
+                                contentBuilder.append(attachment.base64Data)
+                                contentBuilder.append("]")
                             } else {
-                                contentBuilder.append("[图片: ${attachment.fileName}]")
+                                contentBuilder.append("\n[image file: ${attachment.fileName}]")
                             }
                         }
+                        AttachmentType.PDF -> {
+                            contentBuilder.append("\n[pdf file: ${attachment.fileName}]")
+                        }
+                        AttachmentType.DOCUMENT -> {
+                            contentBuilder.append("\n[document file: ${attachment.fileName}]")
+                        }
+                        AttachmentType.ARCHIVE -> {
+                            contentBuilder.append("\n[archive file: ${attachment.fileName}]")
+                        }
                         else -> {
-                            contentBuilder.append("[文件: ${attachment.fileName}]")
+                            contentBuilder.append("\n[file: ${attachment.fileName}]")
                         }
                     }
                 }
