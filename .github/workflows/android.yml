@@ -7,6 +7,16 @@ on:
     branches: [ main, master ]
   release:
     types: [ published ]
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: 'Build type'
+        required: true
+        default: 'debug'
+        type: choice
+        options:
+          - debug
+          - release
 
 env:
   JAVA_VERSION: '17'
@@ -45,12 +55,14 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-gradle-
       
-      - name: Build with Gradle
+      - name: Build Debug APK
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.build_type == 'debug'
         run: |
           cd AIChatHub
           ./gradlew assembleDebug --no-daemon --stacktrace
       
-      - name: Upload APK
+      - name: Upload Debug APK
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.build_type == 'debug'
         uses: actions/upload-artifact@v4
         with:
           name: app-debug-apk
@@ -96,7 +108,7 @@ jobs:
   release:
     name: Build Release APK
     runs-on: ubuntu-latest
-    if: github.event_name == 'release'
+    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.event.inputs.build_type == 'release')
     needs: [test]
     
     steps:
@@ -130,10 +142,6 @@ jobs:
         run: |
           cd AIChatHub
           ./gradlew assembleRelease --no-daemon --stacktrace
-        env:
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
       
       - name: Upload Release APK
         uses: actions/upload-artifact@v4
