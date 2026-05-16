@@ -31,7 +31,7 @@ class SendMessageUseCase @Inject constructor(
         platform: AIPlatform,
         model: String,
         temperature: Float = 0.7f,
-        maxTokens: Int = 81920,  // 增加输出长度限制
+        maxTokens: Int = 8192,  // 增加输出长度限制
         attachments: List<MessageAttachment> = emptyList()  // 新增：附件列表参数
     ): Result<SendMessageResponse> {
         // 获取会话

@@ -1,5 +1,8 @@
 package com.aichathub.ui.viewmodel
 
+import android.content.Context
+import android.net.Uri
+import android.provider.OpenableColumns
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.aichathub.domain.model.*
@@ -8,8 +11,10 @@ import com.aichathub.domain.repository.ChatSessionRepository
 import com.aichathub.domain.repository.SettingsRepository
 import com.aichathub.domain.usecase.*
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import java.util.Base64
 import javax.inject.Inject
 
 data class ChatUiState(
@@ -24,7 +29,8 @@ data class ChatUiState(
     val error: String? = null,
     val activeAPIKey: APIKeyInfo? = null,
     val settings: AppSettings = AppSettings(),
-    val showAPIKeyDialog: Boolean = false
+    val showAPIKeyDialog: Boolean = false,
+    val pendingAttachments: List<MessageAttachment> = emptyList()  // 待发送的附件
 )
 
 @HiltViewModel
@@ -37,7 +43,8 @@ class ChatViewModel @Inject constructor(
     private val clearAllSessionsUseCase: ClearAllSessionsUseCase,
     private val chatSessionRepository: ChatSessionRepository,
     private val apiKeyRepository: APIKeyRepository,
-    private val settingsRepository: SettingsRepository
+    private val settingsRepository: SettingsRepository,
+    @ApplicationContext private val context: Context
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ChatUiState())
@@ -98,6 +105,109 @@ class ChatViewModel @Inject constructor(
         }
     }
 
+    /**
+     * 添加附件到待发送列表
+     */
+    fun addAttachment(uri: Uri) {
+        try {
+            val contentResolver = context.contentResolver
+            val mimeType = contentResolver.getType(uri) ?: "application/octet-stream"
+            val fileName = getFileName(uri) ?: "file_${System.currentTimeMillis()}"
+            val fileSize = getFileSize(uri)
+
+            // 读取文件内容并转换为Base64（对于小文件）
+            val base64Data = if (fileSize < 5 * 1024 * 1024) { // 小于5MB的文件使用Base64
+                contentResolver.openInputStream(uri)?.use { inputStream ->
+                    val bytes = inputStream.readBytes()
+                    Base64.getEncoder().encodeToString(bytes)
+                }
+            } else {
+                null // 大文件使用本地路径
+            }
+
+            val attachment = MessageAttachment(
+                fileName = fileName,
+                mimeType = mimeType,
+                size = fileSize,
+                type = determineAttachmentType(mimeType),
+                localPath = uri.toString(),
+                base64Data = base64Data
+            )
+
+            _uiState.update {
+                it.copy(pendingAttachments = it.pendingAttachments + attachment)
+            }
+        } catch (e: Exception) {
+            _uiState.update {
+                it.copy(error = "添加附件失败: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * 移除附件
+     */
+    fun removeAttachment(attachment: MessageAttachment) {
+        _uiState.update {
+            it.copy(pendingAttachments = it.pendingAttachments.filter { a -> a.id != attachment.id })
+        }
+    }
+
+    /**
+     * 清空所有待发送附件
+     */
+    fun clearAttachments() {
+        _uiState.update { it.copy(pendingAttachments = emptyList()) }
+    }
+
+    private fun getFileName(uri: Uri): String? {
+        var result: String? = null
+        if (uri.scheme == "content") {
+            val cursor = context.contentResolver.query(uri, null, null, null, null)
+            cursor?.use {
+                if (it.moveToFirst()) {
+                    val nameIndex = it.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (nameIndex >= 0) {
+                        result = it.getString(nameIndex)
+                    }
+                }
+            }
+        }
+        if (result == null) {
+            result = uri.path
+            val cut = result?.lastIndexOf('/')
+            if (cut != null && cut != -1) {
+                result = result?.substring(cut + 1)
+            }
+        }
+        return result
+    }
+
+    private fun getFileSize(uri: Uri): Long {
+        var size = 0L
+        if (uri.scheme == "content") {
+            val cursor = context.contentResolver.query(uri, null, null, null, null)
+            cursor?.use {
+                if (it.moveToFirst()) {
+                    val sizeIndex = it.getColumnIndex(OpenableColumns.SIZE)
+                    if (sizeIndex >= 0 && !it.isNull(sizeIndex)) {
+                        size = it.getLong(sizeIndex)
+                    }
+                }
+            }
+        }
+        return size
+    }
+
+    private fun determineAttachmentType(mimeType: String): AttachmentType {
+        return when {
+            mimeType.startsWith("image/") -> AttachmentType.IMAGE
+            mimeType == "application/pdf" -> AttachmentType.PDF
+            mimeType.contains("document") || mimeType.contains("text") -> AttachmentType.DOCUMENT
+            else -> AttachmentType.OTHER
+        }
+    }
+
     fun createNewSession() {
         viewModelScope.launch {
             val session = ChatSession(
@@ -146,39 +256,43 @@ class ChatViewModel @Inject constructor(
 
     fun sendMessage() {
         val text = _uiState.value.inputText.trim()
-        if (text.isBlank()) return
+        val attachments = _uiState.value.pendingAttachments
+
+        // 至少要有文本或附件才能发送
+        if (text.isBlank() && attachments.isEmpty()) return
 
         val session = _uiState.value.currentSession
         if (session == null) {
             createNewSession()
-            // 等待新会话创建完成后再发送
             viewModelScope.launch {
-                // 等待一下让新会话创建
                 kotlinx.coroutines.delay(100)
-                sendMessageActual(text)
+                sendMessageActual(text, attachments)
             }
             return
         }
 
-        sendMessageActual(text)
+        sendMessageActual(text, attachments)
     }
 
-    private fun sendMessageActual(text: String) {
+    private fun sendMessageActual(text: String, attachments: List<MessageAttachment>) {
         viewModelScope.launch {
             _uiState.update {
                 it.copy(
                     inputText = "",
                     isLoading = true,
                     isTyping = true,
-                    error = null
+                    error = null,
+                    pendingAttachments = emptyList() // 清空附件
                 )
             }
 
+            // 创建用户消息（包含附件）
             val userMessage = ChatMessage(
                 role = MessageRole.USER,
                 content = text,
                 platform = _uiState.value.selectedPlatform,
-                model = _uiState.value.selectedModel
+                model = _uiState.value.selectedModel,
+                attachments = attachments
             )
 
             val updatedMessages = _uiState.value.messages + userMessage
@@ -192,7 +306,8 @@ class ChatViewModel @Inject constructor(
                 platform = _uiState.value.selectedPlatform,
                 model = _uiState.value.selectedModel,
                 temperature = _uiState.value.settings.defaultTemperature,
-                maxTokens = _uiState.value.settings.defaultMaxTokens
+                maxTokens = _uiState.value.settings.defaultMaxTokens,
+                attachments = attachments
             )
 
             result.fold(
