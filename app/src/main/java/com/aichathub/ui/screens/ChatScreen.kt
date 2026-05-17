@@ -79,8 +79,15 @@ fun ChatScreen(
                     }
                 },
                 navigationIcon = {
-                    IconButton(onClick = { showSessionDialog = true }) {
-                        Icon(Icons.Default.Menu, contentDescription = "历史记录")
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(onClick = { showSessionDialog = true }) {
+                            Icon(Icons.Default.Menu, contentDescription = "历史记录")
+                        }
+                        IconButton(onClick = onNavigateToAPIKeys) {
+                            Icon(Icons.Default.Key, contentDescription = "API配置")
+                        }
                     }
                 },
                 actions = {
@@ -107,7 +114,8 @@ fun ChatScreen(
                 onAttachFile = { showAttachmentDialog = true },
                 enabled = !uiState.isLoading && uiState.activeAPIKey != null,
                 attachments = uiState.pendingAttachments,
-                onRemoveAttachment = { viewModel.removeAttachment(it) }
+                onRemoveAttachment = { viewModel.removeAttachment(it) },
+                modifier = Modifier.navigationBarsPadding()
             )
         }
     ) { paddingValues ->
