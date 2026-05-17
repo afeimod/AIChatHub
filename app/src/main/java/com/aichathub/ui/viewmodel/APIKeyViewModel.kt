@@ -65,15 +65,6 @@ class APIKeyViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
 
-            // 创建带自定义端点的 APIKeyInfo
-            val keyInfo = APIKeyInfo(
-                id = java.util.UUID.randomUUID().toString(),
-                platform = platform,
-                apiKey = apiKey,
-                name = name.ifBlank { platform.displayName },
-                customEndpoint = customEndpoint
-            )
-
             val result = addAPIKeyUseCase(platform, apiKey, name, customEndpoint)
             result.fold(
                 onSuccess = {
