@@ -132,7 +132,7 @@ fun APIKeyCard(
     apiKey: APIKeyInfo,
     onSetActive: () -> Unit,
     onDelete: () -> Unit,
-    onEdit: () -> Unit,
+    @Suppress("UNUSED_PARAMETER") onEdit: () -> Unit,
     onTest: () -> Unit
 ) {
     var showDeleteDialog by remember { mutableStateOf(false) }
