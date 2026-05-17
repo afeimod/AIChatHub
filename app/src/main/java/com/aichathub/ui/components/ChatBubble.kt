@@ -79,31 +79,19 @@ fun ChatBubble(
                         modifier = Modifier
                             .size(200.dp)
                             .clip(RoundedCornerShape(8.dp))
-                            .background(MaterialTheme.colorScheme.surfaceVariant)
                             .clickable { /* 可以放大查看 */ }
                     ) {
-                        // 优先使用base64Data，因为localPath可能是content:// URI无法被Coil直接加载
                         val imageModel = when {
                             !attachment.base64Data.isNullOrBlank() -> "data:${attachment.mimeType};base64,${attachment.base64Data}"
-                            !attachment.localPath.isNullOrBlank() && attachment.localPath!!.startsWith("file://") -> attachment.localPath
-                            else -> null
+                            !attachment.localPath.isNullOrBlank() -> attachment.localPath
+                            else -> ""
                         }
-                        if (imageModel != null) {
-                            AsyncImage(
-                                model = imageModel,
-                                contentDescription = attachment.fileName,
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Crop
-                            )
-                        } else {
-                            // 如果无法加载图片，显示占位图标
-                            Icon(
-                                imageVector = Icons.Default.BrokenImage,
-                                contentDescription = "图片加载失败",
-                                modifier = Modifier.size(48.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-                            )
-                        }
+                        AsyncImage(
+                            model = imageModel,
+                            contentDescription = attachment.fileName,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
+                        )
                     }
                 }
 
