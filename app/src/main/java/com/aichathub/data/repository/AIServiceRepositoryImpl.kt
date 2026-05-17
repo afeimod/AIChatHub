@@ -270,15 +270,10 @@ class AIServiceRepositoryImpl @Inject constructor(
                             }
                             
                             if (textContent != null && textContent.isNotBlank()) {
-                                // 文档内容太长时截断
-                                val truncatedContent = if (textContent.length > 4000) {
-                                    textContent.substring(0, 4000) + "\n...（内容已截断）"
-                                } else {
-                                    textContent
-                                }
+                                // 完全不限制文档长度
                                 contentItems.add(mapOf(
                                     "type" to "text",
-                                    "text" to "[文档内容如下]\n${truncatedContent}"
+                                    "text" to "[文档内容如下]\n${textContent}"
                                 ))
                             } else {
                                 contentItems.add(mapOf(
@@ -288,22 +283,28 @@ class AIServiceRepositoryImpl @Inject constructor(
                             }
                         }
                         AttachmentType.ARCHIVE -> {
-                            // 压缩包发送base64数据供AI分析
-                            val archiveData = if (!attachment.base64Data.isNullOrBlank()) {
-                                "data:${attachment.mimeType};base64,${attachment.base64Data}"
-                            } else {
+                            // 尝试解码压缩包的base64内容作为文本
+                            val archiveContent = try {
+                                if (!attachment.base64Data.isNullOrBlank()) {
+                                    val bytes = android.util.Base64.decode(attachment.base64Data, android.util.Base64.DEFAULT)
+                                    String(bytes, Charsets.UTF_8)
+                                } else {
+                                    null
+                                }
+                            } catch (e: Exception) {
                                 null
                             }
                             
-                            if (archiveData != null && modelSupportsVision) {
+                            if (archiveContent != null && archiveContent.isNotBlank()) {
+                                // 完全不限制压缩包内容长度
                                 contentItems.add(mapOf(
-                                    "type" to "image_url",
-                                    "image_url" to mapOf("url" to archiveData, "detail" to "low")
+                                    "type" to "text",
+                                    "text" to "[压缩包内容如下]\n${archiveContent}"
                                 ))
                             } else {
                                 contentItems.add(mapOf(
                                     "type" to "text",
-                                    "text" to "[压缩包: ${attachment.fileName}，请分析内容]"
+                                    "text" to "[压缩包: ${attachment.fileName}]"
                                 ))
                             }
                         }
@@ -422,14 +423,10 @@ class AIServiceRepositoryImpl @Inject constructor(
                             null
                         }
                         if (pdfContent != null && pdfContent.isNotBlank()) {
-                            val truncatedContent = if (pdfContent.length > 4000) {
-                                pdfContent.substring(0, 4000) + "\n...（内容已截断）"
-                            } else {
-                                pdfContent
-                            }
-                            "[用户发送了PDF文档: ${attachment.fileName}，内容如下：\n${truncatedContent}]"
+                            // 完全不限制PDF内容长度
+                            "[用户发送了PDF文档: ${attachment.fileName}，内容如下：\n${pdfContent}]"
                         } else {
-                            "[用户发送了PDF文档: ${attachment.fileName}，请分析内容]"
+                            "[用户发送了PDF文档: ${attachment.fileName}]"
                         }
                     }
                     AttachmentType.DOCUMENT -> {
@@ -445,12 +442,8 @@ class AIServiceRepositoryImpl @Inject constructor(
                             null
                         }
                         if (docContent != null && docContent.isNotBlank()) {
-                            val truncatedContent = if (docContent.length > 4000) {
-                                docContent.substring(0, 4000) + "\n...（内容已截断）"
-                            } else {
-                                docContent
-                            }
-                            "[用户发送了文档: ${attachment.fileName}，内容如下：\n${truncatedContent}]"
+                            // 完全不限制文档长度，发送完整内容
+                            "[用户发送了文档: ${attachment.fileName}，内容如下：\n${docContent}]"
                         } else {
                             "[用户发送了文档: ${attachment.fileName}]"
                         }
@@ -468,14 +461,10 @@ class AIServiceRepositoryImpl @Inject constructor(
                             null
                         }
                         if (archiveContent != null && archiveContent.isNotBlank()) {
-                            val truncatedContent = if (archiveContent.length > 4000) {
-                                archiveContent.substring(0, 4000) + "\n...（内容已截断）"
-                            } else {
-                                archiveContent
-                            }
-                            "[用户发送了压缩包: ${attachment.fileName}，内容如下：\n${truncatedContent}]"
+                            // 完全不限制压缩包内容长度
+                            "[用户发送了压缩包: ${attachment.fileName}，内容如下：\n${archiveContent}]"
                         } else {
-                            "[用户发送了压缩包: ${attachment.fileName}，请分析内容]"
+                            "[用户发送了压缩包: ${attachment.fileName}]"
                         }
                     }
                     AttachmentType.OTHER -> "[用户发送了文件: ${attachment.fileName}]"

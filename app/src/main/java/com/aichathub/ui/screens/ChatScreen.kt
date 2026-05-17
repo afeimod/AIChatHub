@@ -224,7 +224,8 @@ fun ChatScreen(
                 // TODO: 实现拍照功能
             },
             onSelectArchive = {
-                documentLauncher.launch("application/zip,application/x-rar-compressed,application/octet-stream")
+                // 使用通用类型选择器，让用户可以选中有压缩包文件
+                documentLauncher.launch("*/*")
             }
         )
     }

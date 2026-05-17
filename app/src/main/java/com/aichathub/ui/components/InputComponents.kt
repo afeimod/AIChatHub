@@ -67,20 +67,28 @@ fun MessageInputWithAttachment(
                                 .clip(RoundedCornerShape(8.dp))
                                 .background(MaterialTheme.colorScheme.surfaceVariant)
                         ) {
+                            // 构建图片数据模型 - 优先使用base64Data
                             val imageModel = if (!attachment.base64Data.isNullOrBlank()) {
-                                "data:${attachment.mimeType};base64,${attachment.base64Data}"
+                                val mimeType = attachment.mimeType.ifBlank { "image/jpeg" }
+                                "data:$mimeType;base64,${attachment.base64Data}"
                             } else if (!attachment.localPath.isNullOrBlank()) {
-                                // 支持 content:// 和 file:// 两种URI格式
                                 attachment.localPath
                             } else {
                                 ""
                             }
-                            AsyncImage(
-                                model = imageModel,
-                                contentDescription = attachment.fileName,
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Crop
-                            )
+                            
+                            // 只有非空字符串才传给AsyncImage
+                            if (imageModel.isNotBlank()) {
+                                AsyncImage(
+                                    model = imageModel,
+                                    contentDescription = attachment.fileName,
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop,
+                                    onError = { /* 预览加载失败不显示错误，保持空白 */ },
+                                    onSuccess = { /* 预览加载成功 */ }
+                                )
+                            }
+                            
                             // 移除按钮
                             IconButton(
                                 onClick = { onRemoveAttachment(attachment) },

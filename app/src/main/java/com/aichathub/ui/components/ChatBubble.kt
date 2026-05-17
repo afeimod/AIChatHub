@@ -82,27 +82,51 @@ fun ChatBubble(
                             .background(MaterialTheme.colorScheme.surfaceVariant)
                             .clickable { /* 可以放大查看 */ }
                     ) {
-                        // 优先使用base64Data，因为localPath可能是content:// URI无法被Coil直接加载
-                        val imageModel = when {
-                            !attachment.base64Data.isNullOrBlank() -> "data:${attachment.mimeType};base64,${attachment.base64Data}"
-                            !attachment.localPath.isNullOrBlank() -> attachment.localPath
-                            else -> null
+                        // 构建图片数据模型 - 优先使用base64Data
+                        val imageModel = if (!attachment.base64Data.isNullOrBlank()) {
+                            // 使用完整的数据URI格式，确保MIME类型正确
+                            val mimeType = attachment.mimeType.ifBlank { "image/jpeg" }
+                            "data:$mimeType;base64,${attachment.base64Data}"
+                        } else if (!attachment.localPath.isNullOrBlank()) {
+                            // 使用本地路径URI
+                            attachment.localPath
+                        } else {
+                            null
                         }
+                        
                         if (imageModel != null) {
                             AsyncImage(
                                 model = imageModel,
                                 contentDescription = attachment.fileName,
                                 modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Crop
+                                contentScale = ContentScale.Fit,
+                                onError = { /* 图片加载失败 */ },
+                                onSuccess = { /* 图片加载成功 */ }
                             )
-                        } else {
-                            // 如果无法加载图片，显示占位图标
-                            Icon(
-                                imageVector = Icons.Default.BrokenImage,
-                                contentDescription = "图片加载失败",
-                                modifier = Modifier.size(48.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-                            )
+                        }
+                        
+                        // 如果imageModel为null或加载中，显示占位图标和文件名
+                        if (imageModel == null) {
+                            Column(
+                                modifier = Modifier.fillMaxSize(),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.BrokenImage,
+                                    contentDescription = "图片加载失败",
+                                    modifier = Modifier.size(48.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = attachment.fileName,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
                         }
                     }
                 }
