@@ -156,7 +156,6 @@ class SettingsRepositoryImpl @Inject constructor(
     }
 
     override suspend fun toggleDarkMode() {
-        val currentSettings = mutableMapOf<kotlinx.coroutines.flow.Flow<com.aichathub.domain.model.AppSettings>, com.aichathub.domain.model.AppSettings>()
         secureStorage.getSettings().collect { settings ->
             val newSettings = settings.copy(isDarkMode = !settings.isDarkMode)
             secureStorage.saveSettings(newSettings)

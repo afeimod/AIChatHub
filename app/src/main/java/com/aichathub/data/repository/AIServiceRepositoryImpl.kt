@@ -343,7 +343,6 @@ class AIServiceRepositoryImpl @Inject constructor(
         // 获取最后一条用户消息，检查是否有附件
         val lastUserMessage = messages.filter { it.role == MessageRole.USER }.lastOrNull()
         val hasImageInLastMessage = lastUserMessage?.attachments?.any { it.type == AttachmentType.IMAGE } == true
-        val hasOtherAttachments = lastUserMessage?.attachments?.any { it.type != AttachmentType.IMAGE } == true
 
         if (hasImageInLastMessage) {
             // 仅当最后一条用户消息包含图片时，才使用VLM端点
@@ -375,9 +374,9 @@ class AIServiceRepositoryImpl @Inject constructor(
             // 安全地获取内容
             val content = try {
                 // 尝试从 messages 格式获取内容
-                val contentFromMessages = body.choices?.firstOrNull()?.messages?.lastOrNull()?.content
+                val contentFromMessages = body.choices.firstOrNull()?.messages?.lastOrNull()?.content
                 // 尝试从 message 格式获取内容
-                val contentFromMessage = body.choices?.firstOrNull()?.message?.content
+                val contentFromMessage = body.choices.firstOrNull()?.message?.content
                 contentFromMessages ?: contentFromMessage ?: ""
             } catch (e: Exception) {
                 // 如果解析失败，返回空字符串
