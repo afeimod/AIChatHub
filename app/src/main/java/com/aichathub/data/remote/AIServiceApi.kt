@@ -11,13 +11,13 @@ interface AIServiceApi {
 
     /**
      * OpenAI/DeepSeek 格式的聊天请求
-     * 使用FlexibleChatRequest来处理多模态和纯文本消息
+     * 使用SimpleChatRequest来处理纯文本消息
      */
     @POST
     suspend fun chatCompletion(
         @Url url: String,
         @Header("Authorization") authorization: String,
-        @Body request: FlexibleChatRequest
+        @Body request: SimpleChatRequest
     ): Response<OpenAIChatResponse>
 
     /**
