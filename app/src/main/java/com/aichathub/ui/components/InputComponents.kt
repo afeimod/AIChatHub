@@ -70,6 +70,7 @@ fun MessageInputWithAttachment(
                             val imageModel = if (!attachment.base64Data.isNullOrBlank()) {
                                 "data:${attachment.mimeType};base64,${attachment.base64Data}"
                             } else if (!attachment.localPath.isNullOrBlank()) {
+                                // 支持 content:// 和 file:// 两种URI格式
                                 attachment.localPath
                             } else {
                                 ""

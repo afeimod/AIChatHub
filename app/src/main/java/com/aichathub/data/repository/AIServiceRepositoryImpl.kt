@@ -115,7 +115,8 @@ class AIServiceRepositoryImpl @Inject constructor(
         maxTokens: Int
     ): SendMessageResponse {
         // DeepSeek使用与OpenAI相同的API格式，复用buildOpenAIRequestMap
-        val requestMap = buildOpenAIRequestMap(model, messages, temperature, maxTokens)
+        // DeepSeek模型支持vision功能（当发送图片时）
+        val requestMap = buildOpenAIRequestMap(model, messages, temperature, maxTokens, supportsVision = true)
 
         val response = api.chatCompletion(
             url = endpoint,
@@ -150,7 +151,8 @@ class AIServiceRepositoryImpl @Inject constructor(
         maxTokens: Int
     ): SendMessageResponse {
         // 构建请求Map
-        val requestMap = buildOpenAIRequestMap(model, messages, temperature, maxTokens)
+        // OpenAI GPT-4o系列支持vision功能
+        val requestMap = buildOpenAIRequestMap(model, messages, temperature, maxTokens, supportsVision = true)
 
         val response = api.chatCompletion(
             url = endpoint,
@@ -182,8 +184,11 @@ class AIServiceRepositoryImpl @Inject constructor(
         model: String,
         messages: List<ChatMessage>,
         temperature: Float,
-        maxTokens: Int
+        maxTokens: Int,
+        supportsVision: Boolean = false
     ): Map<String, Any> {
+        // 检测模型是否支持vision（GPT-4o, GPT-4V等支持多模态）
+        val modelSupportsVision = supportsVision || model.contains("gpt-4o") || model.contains("vision") || model.contains("4o-mini")
         val messagesList = messages.map { chatMessage ->
             if (chatMessage.attachments.isEmpty()) {
                 // 纯文本消息
@@ -209,7 +214,8 @@ class AIServiceRepositoryImpl @Inject constructor(
                             val imageData = if (!attachment.base64Data.isNullOrBlank()) {
                                 "data:${attachment.mimeType};base64,${attachment.base64Data}"
                             } else if (!attachment.localPath.isNullOrBlank()) {
-                                "file://${attachment.localPath}"
+                                // 直接使用localPath，支持content://和file://两种格式
+                                attachment.localPath
                             } else if (!attachment.url.isNullOrBlank()) {
                                 attachment.url
                             } else {
@@ -229,24 +235,77 @@ class AIServiceRepositoryImpl @Inject constructor(
                                 ))
                             }
                         }
-                        // PDF和文档类型以文本形式提及文件名
+                        // PDF和文档类型尝试读取内容
                         AttachmentType.PDF -> {
-                            contentItems.add(mapOf(
-                                "type" to "text",
-                                "text" to "[PDF文档: ${attachment.fileName}]"
-                            ))
+                            // 尝试使用base64数据作为图片发送（PDF可能不被支持）
+                            val pdfData = if (!attachment.base64Data.isNullOrBlank()) {
+                                "data:${attachment.mimeType};base64,${attachment.base64Data}"
+                            } else {
+                                null
+                            }
+                            
+                            if (pdfData != null && modelSupportsVision) {
+                                contentItems.add(mapOf(
+                                    "type" to "image_url",
+                                    "image_url" to mapOf("url" to pdfData, "detail" to "auto")
+                                ))
+                            } else {
+                                contentItems.add(mapOf(
+                                    "type" to "text",
+                                    "text" to "[PDF文档: ${attachment.fileName}，请分析内容]"
+                                ))
+                            }
                         }
                         AttachmentType.DOCUMENT -> {
-                            contentItems.add(mapOf(
-                                "type" to "text",
-                                "text" to "[文档: ${attachment.fileName}]"
-                            ))
+                            // 尝试解码base64获取文本文档内容
+                            val textContent = try {
+                                if (!attachment.base64Data.isNullOrBlank()) {
+                                    val bytes = android.util.Base64.decode(attachment.base64Data, android.util.Base64.DEFAULT)
+                                    String(bytes, Charsets.UTF_8)
+                                } else {
+                                    null
+                                }
+                            } catch (e: Exception) {
+                                null
+                            }
+                            
+                            if (textContent != null && textContent.isNotBlank()) {
+                                // 文档内容太长时截断
+                                val truncatedContent = if (textContent.length > 4000) {
+                                    textContent.substring(0, 4000) + "\n...（内容已截断）"
+                                } else {
+                                    textContent
+                                }
+                                contentItems.add(mapOf(
+                                    "type" to "text",
+                                    "text" to "[文档内容如下]\n${truncatedContent}"
+                                ))
+                            } else {
+                                contentItems.add(mapOf(
+                                    "type" to "text",
+                                    "text" to "[文档: ${attachment.fileName}]"
+                                ))
+                            }
                         }
                         AttachmentType.ARCHIVE -> {
-                            contentItems.add(mapOf(
-                                "type" to "text",
-                                "text" to "[压缩包: ${attachment.fileName}]"
-                            ))
+                            // 压缩包发送base64数据供AI分析
+                            val archiveData = if (!attachment.base64Data.isNullOrBlank()) {
+                                "data:${attachment.mimeType};base64,${attachment.base64Data}"
+                            } else {
+                                null
+                            }
+                            
+                            if (archiveData != null && modelSupportsVision) {
+                                contentItems.add(mapOf(
+                                    "type" to "image_url",
+                                    "image_url" to mapOf("url" to archiveData, "detail" to "low")
+                                ))
+                            } else {
+                                contentItems.add(mapOf(
+                                    "type" to "text",
+                                    "text" to "[压缩包: ${attachment.fileName}，请分析内容]"
+                                ))
+                            }
                         }
                         else -> {
                             contentItems.add(mapOf(
@@ -350,9 +409,75 @@ class AIServiceRepositoryImpl @Inject constructor(
             val attachmentDescriptions = chatMessage.attachments.map { attachment ->
                 when (attachment.type) {
                     AttachmentType.IMAGE -> "[用户发送了图片: ${attachment.fileName}，请分析这张图片的内容]"
-                    AttachmentType.PDF -> "[用户发送了PDF文档: ${attachment.fileName}]"
-                    AttachmentType.DOCUMENT -> "[用户发送了文档: ${attachment.fileName}]"
-                    AttachmentType.ARCHIVE -> "[用户发送了压缩包: ${attachment.fileName}]"
+                    AttachmentType.PDF -> {
+                        // 尝试解码PDF的base64内容
+                        val pdfContent = try {
+                            if (!attachment.base64Data.isNullOrBlank()) {
+                                val bytes = android.util.Base64.decode(attachment.base64Data, android.util.Base64.DEFAULT)
+                                String(bytes, Charsets.UTF_8)
+                            } else {
+                                null
+                            }
+                        } catch (e: Exception) {
+                            null
+                        }
+                        if (pdfContent != null && pdfContent.isNotBlank()) {
+                            val truncatedContent = if (pdfContent.length > 4000) {
+                                pdfContent.substring(0, 4000) + "\n...（内容已截断）"
+                            } else {
+                                pdfContent
+                            }
+                            "[用户发送了PDF文档: ${attachment.fileName}，内容如下：\n${truncatedContent}]"
+                        } else {
+                            "[用户发送了PDF文档: ${attachment.fileName}，请分析内容]"
+                        }
+                    }
+                    AttachmentType.DOCUMENT -> {
+                        // 尝试解码文档的base64内容
+                        val docContent = try {
+                            if (!attachment.base64Data.isNullOrBlank()) {
+                                val bytes = android.util.Base64.decode(attachment.base64Data, android.util.Base64.DEFAULT)
+                                String(bytes, Charsets.UTF_8)
+                            } else {
+                                null
+                            }
+                        } catch (e: Exception) {
+                            null
+                        }
+                        if (docContent != null && docContent.isNotBlank()) {
+                            val truncatedContent = if (docContent.length > 4000) {
+                                docContent.substring(0, 4000) + "\n...（内容已截断）"
+                            } else {
+                                docContent
+                            }
+                            "[用户发送了文档: ${attachment.fileName}，内容如下：\n${truncatedContent}]"
+                        } else {
+                            "[用户发送了文档: ${attachment.fileName}]"
+                        }
+                    }
+                    AttachmentType.ARCHIVE -> {
+                        // 尝试解码压缩包的base64内容
+                        val archiveContent = try {
+                            if (!attachment.base64Data.isNullOrBlank()) {
+                                val bytes = android.util.Base64.decode(attachment.base64Data, android.util.Base64.DEFAULT)
+                                String(bytes, Charsets.UTF_8)
+                            } else {
+                                null
+                            }
+                        } catch (e: Exception) {
+                            null
+                        }
+                        if (archiveContent != null && archiveContent.isNotBlank()) {
+                            val truncatedContent = if (archiveContent.length > 4000) {
+                                archiveContent.substring(0, 4000) + "\n...（内容已截断）"
+                            } else {
+                                archiveContent
+                            }
+                            "[用户发送了压缩包: ${attachment.fileName}，内容如下：\n${truncatedContent}]"
+                        } else {
+                            "[用户发送了压缩包: ${attachment.fileName}，请分析内容]"
+                        }
+                    }
                     AttachmentType.OTHER -> "[用户发送了文件: ${attachment.fileName}]"
                 }
             }.joinToString("\n")

@@ -85,7 +85,7 @@ fun ChatBubble(
                         // 优先使用base64Data，因为localPath可能是content:// URI无法被Coil直接加载
                         val imageModel = when {
                             !attachment.base64Data.isNullOrBlank() -> "data:${attachment.mimeType};base64,${attachment.base64Data}"
-                            !attachment.localPath.isNullOrBlank() && attachment.localPath!!.startsWith("file://") -> attachment.localPath
+                            !attachment.localPath.isNullOrBlank() -> attachment.localPath
                             else -> null
                         }
                         if (imageModel != null) {
