@@ -54,19 +54,16 @@ class AIServiceRepositoryImpl @Inject constructor(
 
             when (platform) {
                 AIPlatform.DEEPSEEK, AIPlatform.OPENAI -> {
-                    // 使用Map格式进行测试连接
-                    val requestMap = mapOf(
-                        "model" to model,
-                        "messages" to listOf(mapOf(
-                            "role" to "user",
-                            "content" to "Hi"
-                        )),
-                        "max_tokens" to 5
+                    // 使用SimpleChatRequest进行测试连接
+                    val request = SimpleChatRequest(
+                        model = model,
+                        messages = testMessages,
+                        maxTokens = 5
                     )
                     val response = api.chatCompletion(
                         url = endpoint,
                         authorization = "Bearer $apiKey",
-                        request = requestMap
+                        request = request
                     )
                     if (response.isSuccessful) Result.success(true)
                     else Result.failure(Exception("Connection failed: ${response.code()}"))
@@ -114,14 +111,14 @@ class AIServiceRepositoryImpl @Inject constructor(
         temperature: Float,
         maxTokens: Int
     ): SendMessageResponse {
-        // DeepSeek使用与OpenAI相同的API格式，复用buildOpenAIRequestMap
+        // DeepSeek使用与OpenAI相同的API格式，复用buildOpenAIRequest
         // DeepSeek模型支持vision功能（当发送图片时）
-        val requestMap = buildOpenAIRequestMap(model, messages, temperature, maxTokens, supportsVision = true)
+        val request = buildOpenAIRequest(model, messages, temperature, maxTokens, supportsVision = true)
 
         val response = api.chatCompletion(
             url = endpoint,
             authorization = "Bearer $apiKey",
-            request = requestMap
+            request = request
         )
 
         if (response.isSuccessful) {
@@ -150,14 +147,14 @@ class AIServiceRepositoryImpl @Inject constructor(
         temperature: Float,
         maxTokens: Int
     ): SendMessageResponse {
-        // 构建请求Map
+        // 构建请求
         // OpenAI GPT-4o系列支持vision功能
-        val requestMap = buildOpenAIRequestMap(model, messages, temperature, maxTokens, supportsVision = true)
+        val request = buildOpenAIRequest(model, messages, temperature, maxTokens, supportsVision = true)
 
         val response = api.chatCompletion(
             url = endpoint,
             authorization = "Bearer $apiKey",
-            request = requestMap
+            request = request
         )
 
         if (response.isSuccessful) {
@@ -177,84 +174,48 @@ class AIServiceRepositoryImpl @Inject constructor(
     }
 
     /**
-     * 构建OpenAI/DeepSeek 兼容的请求Map
+     * 构建OpenAI/DeepSeek 兼容的聊天请求
      * 支持纯文本消息和多模态消息（vision API）
      */
-    private fun buildOpenAIRequestMap(
+    private fun buildOpenAIRequest(
         model: String,
         messages: List<ChatMessage>,
         temperature: Float,
         maxTokens: Int,
         supportsVision: Boolean = false
-    ): Map<String, Any> {
+    ): SimpleChatRequest {
         // 检测模型是否支持vision（GPT-4o, GPT-4V等支持多模态）
         val modelSupportsVision = supportsVision || model.contains("gpt-4o") || model.contains("vision") || model.contains("4o-mini")
+        
         val messagesList = messages.map { chatMessage ->
             if (chatMessage.attachments.isEmpty()) {
                 // 纯文本消息
-                mapOf(
-                    "role" to chatMessage.role.name.lowercase(),
-                    "content" to chatMessage.content
+                MessageDto(
+                    role = chatMessage.role.name.lowercase(),
+                    content = chatMessage.content
                 )
             } else {
-                // 多模态消息：包含附件
-                val contentItems = mutableListOf<Map<String, Any>>()
-
-                // 添加文本内容（即使是空字符串也要添加文本项）
-                contentItems.add(mapOf(
-                    "type" to "text",
-                    "text" to (chatMessage.content.ifBlank { "请分析这个文件内容" })
-                ))
-
-                // 添加附件 - 详细处理每种类型
+                // 多模态消息：构建包含附件的文本内容
+                val textParts = mutableListOf<String>()
+                
+                // 添加文本内容
+                if (chatMessage.content.isNotBlank()) {
+                    textParts.add(chatMessage.content)
+                }
+                
+                // 添加附件信息
                 chatMessage.attachments.forEach { attachment ->
                     when (attachment.type) {
                         AttachmentType.IMAGE -> {
-                            // 优先使用base64Data
-                            val imageData = if (!attachment.base64Data.isNullOrBlank()) {
-                                "data:${attachment.mimeType};base64,${attachment.base64Data}"
-                            } else if (!attachment.localPath.isNullOrBlank()) {
-                                // 直接使用localPath，支持content://和file://两种格式
-                                attachment.localPath
-                            } else if (!attachment.url.isNullOrBlank()) {
-                                attachment.url
+                            // 图片 - 如果有base64数据则包含
+                            if (!attachment.base64Data.isNullOrBlank()) {
+                                textParts.add("[图片: ${attachment.fileName}，base64数据已附加]")
                             } else {
-                                null
-                            }
-                            
-                            if (imageData != null) {
-                                contentItems.add(mapOf(
-                                    "type" to "image_url",
-                                    "image_url" to mapOf("url" to imageData, "detail" to "auto")
-                                ))
-                            } else {
-                                // 如果没有图片数据，添加文本说明
-                                contentItems.add(mapOf(
-                                    "type" to "text",
-                                    "text" to "[图片文件: ${attachment.fileName}]"
-                                ))
+                                textParts.add("[图片: ${attachment.fileName}]")
                             }
                         }
-                        // PDF和文档类型尝试读取内容
                         AttachmentType.PDF -> {
-                            // 尝试使用base64数据作为图片发送（PDF可能不被支持）
-                            val pdfData = if (!attachment.base64Data.isNullOrBlank()) {
-                                "data:${attachment.mimeType};base64,${attachment.base64Data}"
-                            } else {
-                                null
-                            }
-                            
-                            if (pdfData != null && modelSupportsVision) {
-                                contentItems.add(mapOf(
-                                    "type" to "image_url",
-                                    "image_url" to mapOf("url" to pdfData, "detail" to "auto")
-                                ))
-                            } else {
-                                contentItems.add(mapOf(
-                                    "type" to "text",
-                                    "text" to "[PDF文档: ${attachment.fileName}，请分析内容]"
-                                ))
-                            }
+                            textParts.add("[PDF文档: ${attachment.fileName}，请分析内容]")
                         }
                         AttachmentType.DOCUMENT -> {
                             // 尝试解码base64获取文本文档内容
@@ -270,65 +231,32 @@ class AIServiceRepositoryImpl @Inject constructor(
                             }
                             
                             if (textContent != null && textContent.isNotBlank()) {
-                                // 完全不限制文档长度
-                                contentItems.add(mapOf(
-                                    "type" to "text",
-                                    "text" to "[文档内容如下]\n${textContent}"
-                                ))
+                                textParts.add("[文档内容如下]\n${textContent}")
                             } else {
-                                contentItems.add(mapOf(
-                                    "type" to "text",
-                                    "text" to "[文档: ${attachment.fileName}]"
-                                ))
+                                textParts.add("[文档: ${attachment.fileName}]")
                             }
                         }
                         AttachmentType.ARCHIVE -> {
-                            // 尝试解码压缩包的base64内容作为文本
-                            val archiveContent = try {
-                                if (!attachment.base64Data.isNullOrBlank()) {
-                                    val bytes = android.util.Base64.decode(attachment.base64Data, android.util.Base64.DEFAULT)
-                                    String(bytes, Charsets.UTF_8)
-                                } else {
-                                    null
-                                }
-                            } catch (e: Exception) {
-                                null
-                            }
-                            
-                            if (archiveContent != null && archiveContent.isNotBlank()) {
-                                // 完全不限制压缩包内容长度
-                                contentItems.add(mapOf(
-                                    "type" to "text",
-                                    "text" to "[压缩包内容如下]\n${archiveContent}"
-                                ))
-                            } else {
-                                contentItems.add(mapOf(
-                                    "type" to "text",
-                                    "text" to "[压缩包: ${attachment.fileName}]"
-                                ))
-                            }
+                            textParts.add("[压缩包: ${attachment.fileName}]")
                         }
-                        else -> {
-                            contentItems.add(mapOf(
-                                "type" to "text",
-                                "text" to "[附件: ${attachment.fileName}]"
-                            ))
+                        AttachmentType.OTHER -> {
+                            textParts.add("[附件: ${attachment.fileName}]")
                         }
                     }
                 }
-
-                mapOf(
-                    "role" to chatMessage.role.name.lowercase(),
-                    "content" to contentItems
+                
+                MessageDto(
+                    role = chatMessage.role.name.lowercase(),
+                    content = textParts.joinToString("\n")
                 )
             }
         }
-
-        return mapOf(
-            "model" to model,
-            "messages" to messagesList,
-            "temperature" to temperature,
-            "max_tokens" to maxTokens
+        
+        return SimpleChatRequest(
+            model = model,
+            messages = messagesList,
+            temperature = temperature,
+            maxTokens = maxTokens
         )
     }
 
