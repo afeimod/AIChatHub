@@ -5,16 +5,42 @@ import kotlinx.serialization.Serializable
 
 // ==================== OpenAI / DeepSeek API Models ====================
 
+/**
+ * 通用的聊天请求格式
+ * 支持纯文本消息和多模态消息（vision API）
+ */
 @Serializable
-data class OpenAIChatRequest(
+data class FlexibleChatRequest(
     val model: String,
-    val messages: List<MessageDto>,
+    val messages: List<FlexibleMessageDto>,
     val temperature: Float? = null,
     @SerialName("max_tokens")
     val maxTokens: Int? = null,
     @SerialName("top_p")
     val topP: Float? = null,
     val stream: Boolean = false
+)
+
+/**
+ * 灵活的OpenAI消息格式
+ * 支持纯文本消息（content为字符串）和多模态消息（content为对象列表）
+ */
+@Serializable
+data class FlexibleMessageDto(
+    val role: String,
+    val content: String
+)
+
+/**
+ * 简化版的聊天请求，用于纯文本消息
+ */
+@Serializable
+data class SimpleChatRequest(
+    val model: String,
+    val messages: List<MessageDto>,
+    val temperature: Float? = null,
+    @SerialName("max_tokens")
+    val maxTokens: Int? = null
 )
 
 @Serializable
@@ -55,23 +81,13 @@ data class MultimodalMessageDto(
 @Serializable
 data class MultimodalOpenAIChatRequest(
     val model: String,
-    val messages: List<FlexibleMessageDto>,
+    val messages: List<MultimodalMessageDto>,
     val temperature: Float? = null,
     @SerialName("max_tokens")
     val maxTokens: Int? = null,
     @SerialName("top_p")
     val topP: Float? = null,
     val stream: Boolean = false
-)
-
-/**
- * 灵活的OpenAI消息格式
- * 支持纯文本消息（content为字符串）和多模态消息（content为对象列表）
- */
-@Serializable
-data class FlexibleMessageDto(
-    val role: String,
-    val content: FlexibleContent
 )
 
 /**
