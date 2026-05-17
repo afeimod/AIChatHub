@@ -107,18 +107,15 @@ fun ChatScreen(
                 onAttachFile = { showAttachmentDialog = true },
                 enabled = !uiState.isLoading && uiState.activeAPIKey != null,
                 attachments = uiState.pendingAttachments,
-                onRemoveAttachment = { viewModel.removeAttachment(it) },
-                modifier = Modifier.navigationBarsPadding()
+                onRemoveAttachment = { viewModel.removeAttachment(it) }
             )
-        },
-        containerColor = MaterialTheme.colorScheme.background
+        }
     ) { paddingValues ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
                 .background(MaterialTheme.colorScheme.background)
-                .imePadding()
         ) {
             // 平台选择器
             Row(
