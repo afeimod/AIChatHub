@@ -1,8 +1,6 @@
 package com.aichathub.data.remote
 
 import com.aichathub.data.model.*
-import com.aichathub.data.repository.MiniMaxVLMRequest
-import com.aichathub.data.repository.MiniMaxVLMResponse
 import retrofit2.Response
 import retrofit2.http.*
 
@@ -13,13 +11,13 @@ interface AIServiceApi {
 
     /**
      * OpenAI/DeepSeek 格式的聊天请求
-     * 使用 Map<String, Any?> 以支持多模态消息（内容数组格式）
+     * 支持纯文本和多模态消息（通过FlexibleMessageDto）
      */
     @POST
     suspend fun chatCompletion(
         @Url url: String,
         @Header("Authorization") authorization: String,
-        @Body request: Map<String, Any?>
+        @Body request: Map<String, @JvmSuppressWildcards Any>
     ): Response<OpenAIChatResponse>
 
     /**
@@ -43,7 +41,8 @@ interface AIServiceApi {
     ): Response<MiniMaxChatResponse>
 
     /**
-     * MiniMax VLM（视觉语言模型）请求
+     * MiniMax VLM (Vision Language Model) 请求
+     * 用于处理图片等多模态输入
      */
     @POST
     suspend fun miniMaxVLM(
@@ -52,6 +51,47 @@ interface AIServiceApi {
         @Body request: MiniMaxVLMRequest
     ): Response<MiniMaxVLMResponse>
 }
+
+/**
+ * MiniMax VLM 请求模型
+ */
+@kotlinx.serialization.Serializable
+data class MiniMaxVLMRequest(
+    val prompt: String,
+    @kotlinx.serialization.SerialName("image_url")
+    val imageUrl: String
+)
+
+/**
+ * MiniMax VLM 响应模型
+ */
+@kotlinx.serialization.Serializable
+data class MiniMaxVLMResponse(
+    val id: String? = null,
+    val choices: List<MiniMaxVLMChoice>? = null,
+    val created: Long? = null,
+    val base_resp: MiniMaxBaseResp? = null
+)
+
+@kotlinx.serialization.Serializable
+data class MiniMaxBaseResp(
+    val status_code: Int = 0,
+    val status_msg: String = ""
+)
+
+@kotlinx.serialization.Serializable
+data class MiniMaxVLMChoice(
+    val index: Int = 0,
+    val message: MiniMaxVLMMessage? = null,
+    @kotlinx.serialization.SerialName("finish_reason")
+    val finishReason: String? = null
+)
+
+@kotlinx.serialization.Serializable
+data class MiniMaxVLMMessage(
+    val role: String = "assistant",
+    val content: String = ""
+)
 
 /**
  * API响应包装类

@@ -65,9 +65,17 @@ fun MessageInputWithAttachment(
                             modifier = Modifier
                                 .size(80.dp)
                                 .clip(RoundedCornerShape(8.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant)
                         ) {
+                            val imageModel = if (!attachment.base64Data.isNullOrBlank()) {
+                                "data:${attachment.mimeType};base64,${attachment.base64Data}"
+                            } else if (!attachment.localPath.isNullOrBlank()) {
+                                attachment.localPath
+                            } else {
+                                ""
+                            }
                             AsyncImage(
-                                model = attachment.localPath ?: attachment.base64Data?.let { "data:${attachment.mimeType};base64,$it" } ?: "",
+                                model = imageModel,
                                 contentDescription = attachment.fileName,
                                 modifier = Modifier.fillMaxSize(),
                                 contentScale = ContentScale.Crop
@@ -248,8 +256,13 @@ fun AttachmentImagePreview(
             .clip(RoundedCornerShape(8.dp))
             .clickable { /* 查看大图 */ }
     ) {
+        val imageModel = if (!attachment.base64Data.isNullOrBlank()) {
+            "data:${attachment.mimeType};base64,${attachment.base64Data}"
+        } else {
+            attachment.localPath ?: ""
+        }
         AsyncImage(
-            model = attachment.localPath ?: "",
+            model = imageModel,
             contentDescription = attachment.fileName,
             modifier = Modifier.fillMaxSize(),
             contentScale = ContentScale.Crop
