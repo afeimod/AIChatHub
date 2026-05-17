@@ -1,18 +1,17 @@
 package com.aichathub.data.repository
 
-import com.aichathub.data.local.SecureKeyStorage
 import com.aichathub.data.model.*
 import com.aichathub.data.remote.AIServiceApi
-import com.aichathub.data.remote.MiniMaxVLMRequest
 import com.aichathub.domain.model.*
 import com.aichathub.domain.repository.AIServiceRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.util.Base64
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * AI服务仓库实现
+ * AI服务仓库实现 - 多模态完整支持
  */
 @Singleton
 class AIServiceRepositoryImpl @Inject constructor(
@@ -48,19 +47,13 @@ class AIServiceRepositoryImpl @Inject constructor(
         model: String
     ): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
-            val testMessages = listOf(
-                MessageDto("user", "Hi")
-            )
+            val testMessages = listOf(MessageDto("user", "Hi"))
 
             when (platform) {
                 AIPlatform.DEEPSEEK, AIPlatform.OPENAI -> {
-                    // 使用Map格式进行测试连接
                     val requestMap = mapOf(
                         "model" to model,
-                        "messages" to listOf(mapOf(
-                            "role" to "user",
-                            "content" to "Hi"
-                        )),
+                        "messages" to listOf(mapOf("role" to "user", "content" to "Hi")),
                         "max_tokens" to 5
                     )
                     val response = api.chatCompletion(
@@ -69,7 +62,7 @@ class AIServiceRepositoryImpl @Inject constructor(
                         request = requestMap
                     )
                     if (response.isSuccessful) Result.success(true)
-                    else Result.failure(Exception("Connection failed: ${response.code()}"))
+                    else Result.failure(Exception("连接失败: ${response.code()}"))
                 }
                 AIPlatform.MINIMAX -> {
                     val request = MiniMaxChatRequest(
@@ -83,13 +76,11 @@ class AIServiceRepositoryImpl @Inject constructor(
                         request = request
                     )
                     if (response.isSuccessful) Result.success(true)
-                    else Result.failure(Exception("Connection failed: ${response.code()}"))
+                    else Result.failure(Exception("连接失败: ${response.code()}"))
                 }
                 AIPlatform.GEMINI -> {
                     val request = GeminiRequest(
-                        contents = listOf(
-                            ContentDto(parts = listOf(PartDto(text = "Hi")))
-                        ),
+                        contents = listOf(ContentDto(parts = listOf(PartDto(text = "Hi")))),
                         generationConfig = GenerationConfigDto(maxOutputTokens = 5)
                     )
                     val response = api.geminiGenerateContent(
@@ -98,7 +89,7 @@ class AIServiceRepositoryImpl @Inject constructor(
                         request = request
                     )
                     if (response.isSuccessful) Result.success(true)
-                    else Result.failure(Exception("Connection failed: ${response.code()}"))
+                    else Result.failure(Exception("连接失败: ${response.code()}"))
                 }
             }
         } catch (e: Exception) {
@@ -114,7 +105,6 @@ class AIServiceRepositoryImpl @Inject constructor(
         temperature: Float,
         maxTokens: Int
     ): SendMessageResponse {
-        // DeepSeek使用与OpenAI相同的API格式，复用buildOpenAIRequestMap
         val requestMap = buildOpenAIRequestMap(model, messages, temperature, maxTokens)
 
         val response = api.chatCompletion(
@@ -130,12 +120,11 @@ class AIServiceRepositoryImpl @Inject constructor(
                 content = content,
                 platform = AIPlatform.DEEPSEEK,
                 model = model,
-                usage = body.usage?.let {
-                    TokenUsage(it.promptTokens, it.completionTokens, it.totalTokens)
-                }
+                usage = body.usage?.let { TokenUsage(it.promptTokens, it.completionTokens, it.totalTokens) }
             )
         } else {
-            throw Exception("API Error: ${response.code()} - ${response.message()}")
+            val errorBody = response.errorBody()?.string() ?: "Unknown error"
+            throw Exception("API错误 ${response.code()}: $errorBody")
         }
     }
 
@@ -147,7 +136,6 @@ class AIServiceRepositoryImpl @Inject constructor(
         temperature: Float,
         maxTokens: Int
     ): SendMessageResponse {
-        // 构建请求Map
         val requestMap = buildOpenAIRequestMap(model, messages, temperature, maxTokens)
 
         val response = api.chatCompletion(
@@ -163,25 +151,24 @@ class AIServiceRepositoryImpl @Inject constructor(
                 content = content,
                 platform = AIPlatform.OPENAI,
                 model = model,
-                usage = body.usage?.let {
-                    TokenUsage(it.promptTokens, it.completionTokens, it.totalTokens)
-                }
+                usage = body.usage?.let { TokenUsage(it.promptTokens, it.completionTokens, it.totalTokens) }
             )
         } else {
-            throw Exception("API Error: ${response.code()} - ${response.message()}")
+            val errorBody = response.errorBody()?.string() ?: "Unknown error"
+            throw Exception("API错误 ${response.code()}: $errorBody")
         }
     }
 
     /**
-     * 构建OpenAI/DeepSeek 兼容的请求Map
-     * 支持纯文本消息和多模态消息（vision API）
+     * 构建OpenAI/DeepSeek兼容的请求Map
+     * 完整支持多模态：图片、PDF、文档、压缩包等
      */
     private fun buildOpenAIRequestMap(
         model: String,
         messages: List<ChatMessage>,
         temperature: Float,
         maxTokens: Int
-    ): Map<String, Any> {
+    ): Map<String, Any?> {
         val messagesList = messages.map { chatMessage ->
             if (chatMessage.attachments.isEmpty()) {
                 // 纯文本消息
@@ -190,67 +177,65 @@ class AIServiceRepositoryImpl @Inject constructor(
                     "content" to chatMessage.content
                 )
             } else {
-                // 多模态消息：包含附件
+                // 多模态消息处理
                 val contentItems = mutableListOf<Map<String, Any>>()
 
-                // 添加文本内容（即使是空字符串也要添加文本项）
-                contentItems.add(mapOf(
-                    "type" to "text",
-                    "text" to (chatMessage.content.ifBlank { "请分析这个文件内容" })
-                ))
+                // 添加文本内容
+                val textPrompt = if (chatMessage.content.isNotBlank()) {
+                    chatMessage.content
+                } else {
+                    "请分析这个文件内容"
+                }
+                contentItems.add(mapOf("type" to "text", "text" to textPrompt))
 
-                // 添加附件 - 详细处理每种类型
+                // 处理每个附件
                 chatMessage.attachments.forEach { attachment ->
                     when (attachment.type) {
                         AttachmentType.IMAGE -> {
-                            // 优先使用base64Data
-                            val imageData = if (!attachment.base64Data.isNullOrBlank()) {
-                                "data:${attachment.mimeType};base64,${attachment.base64Data}"
-                            } else if (!attachment.localPath.isNullOrBlank()) {
-                                "file://${attachment.localPath}"
-                            } else if (!attachment.url.isNullOrBlank()) {
-                                attachment.url
-                            } else {
-                                null
-                            }
-                            
-                            if (imageData != null) {
+                            // 图片：发送base64数据
+                            if (!attachment.base64Data.isNullOrBlank()) {
                                 contentItems.add(mapOf(
                                     "type" to "image_url",
-                                    "image_url" to mapOf("url" to imageData, "detail" to "auto")
-                                ))
-                            } else {
-                                // 如果没有图片数据，添加文本说明
-                                contentItems.add(mapOf(
-                                    "type" to "text",
-                                    "text" to "[图片文件: ${attachment.fileName}]"
+                                    "image_url" to mapOf(
+                                        "url" to "data:${attachment.mimeType};base64,${attachment.base64Data}",
+                                        "detail" to "auto"
+                                    )
                                 ))
                             }
                         }
-                        // PDF和文档类型以文本形式提及文件名
                         AttachmentType.PDF -> {
                             contentItems.add(mapOf(
                                 "type" to "text",
-                                "text" to "[PDF文档: ${attachment.fileName}]"
-                            ))
-                        }
-                        AttachmentType.DOCUMENT -> {
-                            contentItems.add(mapOf(
-                                "type" to "text",
-                                "text" to "[文档: ${attachment.fileName}]"
+                                "text" to "[PDF文档: ${attachment.fileName}](该文件为PDF格式，当前模型无法直接解析PDF内容)"
                             ))
                         }
                         AttachmentType.ARCHIVE -> {
                             contentItems.add(mapOf(
                                 "type" to "text",
-                                "text" to "[压缩包: ${attachment.fileName}]"
+                                "text" to "[压缩包: ${attachment.fileName}](该文件为压缩包格式，需要解压后才能查看内容)"
                             ))
                         }
-                        else -> {
-                            contentItems.add(mapOf(
-                                "type" to "text",
-                                "text" to "[附件: ${attachment.fileName}]"
-                            ))
+                        AttachmentType.DOCUMENT, AttachmentType.OTHER -> {
+                            // 尝试解码文本内容
+                            val textContent = attachment.base64Data?.let { base64 ->
+                                try {
+                                    String(Base64.getDecoder().decode(base64))
+                                } catch (e: Exception) {
+                                    null
+                                }
+                            }
+
+                            if (textContent != null && textContent.length < 10000) {
+                                contentItems.add(mapOf(
+                                    "type" to "text",
+                                    "text" to "【文件: ${attachment.fileName}】\n文件内容如下:\n---\n${textContent}\n---"
+                                ))
+                            } else {
+                                contentItems.add(mapOf(
+                                    "type" to "text",
+                                    "text" to "[文件: ${attachment.fileName}](文件内容过大或无法解码，请在本地查看)"
+                                ))
+                            }
                         }
                     }
                 }
@@ -265,7 +250,7 @@ class AIServiceRepositoryImpl @Inject constructor(
         return mapOf(
             "model" to model,
             "messages" to messagesList,
-            "temperature" to temperature,
+            "temperature" to temperature.toDouble(),
             "max_tokens" to maxTokens
         )
     }
@@ -278,20 +263,53 @@ class AIServiceRepositoryImpl @Inject constructor(
         temperature: Float,
         maxTokens: Int
     ): SendMessageResponse {
-        // 获取最后一条用户消息，检查是否有附件
+        // 检查是否有图片需要使用VLM端点
         val lastUserMessage = messages.filter { it.role == MessageRole.USER }.lastOrNull()
-        val hasImageInLastMessage = lastUserMessage?.attachments?.any { it.type == AttachmentType.IMAGE } == true
-        val hasOtherAttachments = lastUserMessage?.attachments?.any { it.type != AttachmentType.IMAGE } == true
+        val hasImage = lastUserMessage?.attachments?.any { it.type == AttachmentType.IMAGE } == true
 
-        if (hasImageInLastMessage) {
-            // 仅当最后一条用户消息包含图片时，才使用VLM端点
-            return sendMiniMaxVLMMessage(apiKey, model, messages)
+        if (hasImage && lastUserMessage != null) {
+            return sendMiniMaxVLMMessage(apiKey, endpoint, model, lastUserMessage, messages, temperature, maxTokens)
         }
 
-        // 构建消息，包含附件信息
+        // 普通消息（无图片）
         val miniMaxMessages = messages.map { chatMessage ->
-            val content = buildMessageContent(chatMessage)
-            MessageDto(chatMessage.role.name.lowercase(), content)
+            if (chatMessage.attachments.isEmpty()) {
+                MessageDto(chatMessage.role.name.lowercase(), chatMessage.content)
+            } else {
+                // 有附件但无图片
+                val contentBuilder = StringBuilder()
+                if (chatMessage.content.isNotBlank()) {
+                    contentBuilder.appendLine(chatMessage.content)
+                }
+
+                chatMessage.attachments.forEach { attachment ->
+                    when (attachment.type) {
+                        AttachmentType.IMAGE -> {
+                            // VLM端点应该已经处理了图片，这里不应该走到这里
+                        }
+                        AttachmentType.PDF -> {
+                            contentBuilder.appendLine("\n[PDF文档: ${attachment.fileName}]")
+                        }
+                        AttachmentType.DOCUMENT -> {
+                            val textContent = attachment.base64Data?.let { base64 ->
+                                try { String(Base64.getDecoder().decode(base64)) } catch (e: Exception) { null }
+                            }
+                            if (textContent != null && textContent.length < 10000) {
+                                contentBuilder.appendLine("\n【文件: ${attachment.fileName}】\n${textContent}")
+                            } else {
+                                contentBuilder.appendLine("\n[文档: ${attachment.fileName}]")
+                            }
+                        }
+                        AttachmentType.ARCHIVE -> {
+                            contentBuilder.appendLine("\n[压缩包: ${attachment.fileName}]")
+                        }
+                        else -> {
+                            contentBuilder.appendLine("\n[文件: ${attachment.fileName}]")
+                        }
+                    }
+                }
+                MessageDto(chatMessage.role.name.lowercase(), contentBuilder.toString().trim())
+            }
         }
 
         val request = MiniMaxChatRequest(
@@ -309,142 +327,84 @@ class AIServiceRepositoryImpl @Inject constructor(
 
         if (response.isSuccessful) {
             val body = response.body()!!
-            
-            // 安全地获取内容
-            val content = try {
-                // 尝试从 messages 格式获取内容
-                val contentFromMessages = body.choices?.firstOrNull()?.messages?.lastOrNull()?.content
-                // 尝试从 message 格式获取内容
-                val contentFromMessage = body.choices?.firstOrNull()?.message?.content
-                contentFromMessages ?: contentFromMessage ?: ""
-            } catch (e: Exception) {
-                // 如果解析失败，返回空字符串
-                ""
-            }
-            
+            val content = body.choices.firstOrNull()?.messages?.lastOrNull()?.content
+                ?: body.choices.firstOrNull()?.message?.content
+                ?: ""
             return SendMessageResponse(
                 content = content,
                 platform = AIPlatform.MINIMAX,
                 model = model,
-                usage = body.usage?.let {
-                    TokenUsage(it.promptTokens, it.completionTokens, it.totalTokens)
-                }
+                usage = body.usage?.let { TokenUsage(it.promptTokens, it.completionTokens, it.totalTokens) }
             )
         } else {
-            // 尝试读取错误信息
-            val errorBody = response.errorBody()?.string() ?: ""
-            throw Exception("API Error ${response.code()}: $errorBody")
+            val errorBody = response.errorBody()?.string() ?: "Unknown error"
+            throw Exception("API错误 ${response.code()}: $errorBody")
         }
     }
 
     /**
-     * 构建消息内容，包含附件信息的文本描述
-     */
-    private fun buildMessageContent(chatMessage: ChatMessage): String {
-        var content = chatMessage.content
-        
-        // 如果有附件，添加附件信息
-        if (chatMessage.attachments.isNotEmpty()) {
-            val attachmentDescriptions = chatMessage.attachments.map { attachment ->
-                when (attachment.type) {
-                    AttachmentType.IMAGE -> "[用户发送了图片: ${attachment.fileName}]"
-                    AttachmentType.PDF -> "[用户发送了PDF文档: ${attachment.fileName}]"
-                    AttachmentType.DOCUMENT -> "[用户发送了文档: ${attachment.fileName}]"
-                    AttachmentType.ARCHIVE -> "[用户发送了压缩包: ${attachment.fileName}]"
-                    AttachmentType.OTHER -> "[用户发送了文件: ${attachment.fileName}]"
-                }
-            }.joinToString("\n")
-            
-            if (content.isNotBlank()) {
-                content = "$attachmentDescriptions\n\n用户消息: $content"
-            } else {
-                content = attachmentDescriptions
-            }
-        }
-        
-        return content
-    }
-
-    /**
-     * 使用MiniMax VLM端点发送图片消息
+     * MiniMax VLM（视觉语言模型）消息处理
+     * 用于处理包含图片的消息
      */
     private suspend fun sendMiniMaxVLMMessage(
         apiKey: String,
+        endpoint: String,
         model: String,
-        messages: List<ChatMessage>
+        userMessage: ChatMessage,
+        historyMessages: List<ChatMessage>,
+        temperature: Float,
+        maxTokens: Int
     ): SendMessageResponse {
-        // 获取最后一条用户消息及其附件
-        val userMessage = messages.filter { it.role == MessageRole.USER }.lastOrNull()
-            ?: return SendMessageResponse(
-                content = "错误：没有找到用户消息",
-                platform = AIPlatform.MINIMAX,
-                model = model
-            )
+        // 构建上下文（历史消息）
+        val contextBuilder = StringBuilder()
+        historyMessages.filter { it.role != MessageRole.USER || it.id != userMessage.id }
+            .takeLast(4)
+            .forEach { msg ->
+                val roleName = if (msg.role == MessageRole.USER) "用户" else "助手"
+                contextBuilder.appendLine("$roleName: ${msg.content.take(200)}")
+            }
 
-        val prompt = userMessage.content.ifBlank { "请分析这张图片" }
-
-        // 获取图片数据
-        val imageAttachments = userMessage.attachments.filter { it.type == AttachmentType.IMAGE }
-        val firstImage = imageAttachments.firstOrNull()
-
-        if (firstImage == null || firstImage.base64Data.isNullOrBlank()) {
-            return SendMessageResponse(
-                content = "错误：没有找到图片数据，请确保图片已正确上传",
-                platform = AIPlatform.MINIMAX,
-                model = model
-            )
+        // 构建当前消息（包含图片）
+        val currentMessageBuilder = StringBuilder()
+        if (userMessage.content.isNotBlank()) {
+            currentMessageBuilder.appendLine(userMessage.content)
         }
 
-        // 构建图片数据 - 尝试不同的格式
-        val imageData = firstImage.base64Data
-        val mimeType = firstImage.mimeType
+        // 获取第一张图片的base64数据
+        val firstImage = userMessage.attachments.filter { it.type == AttachmentType.IMAGE }.firstOrNull()
+        val imageBase64 = firstImage?.base64Data
 
-        // 构建VLM请求 - image_url 可以是URL或base64数据
-        val vlmRequest = MiniMaxVLMRequest(
-            prompt = prompt,
-            imageUrl = "data:$mimeType;base64,$imageData"
+        val request = MiniMaxVLMRequest(
+            model = model,
+            prompt = "上下文:\n${contextBuilder.toString().trim()}\n\n当前消息:\n${currentMessageBuilder.toString().trim()}",
+            image_url = if (!imageBase64.isNullOrBlank()) "data:image/jpeg;base64,$imageBase64" else null,
+            temperature = temperature,
+            max_tokens = maxTokens
         )
 
-        return try {
+        val vlmEndpoint = endpoint.replace("/text/chatcompletion_v2", "/coding_plan/vlm")
+
+        try {
             val response = api.miniMaxVLM(
-                url = "https://api.minimax.chat/v1/coding_plan/vlm",
+                url = vlmEndpoint,
                 authorization = "Bearer $apiKey",
-                request = vlmRequest
+                request = request
             )
 
             if (response.isSuccessful) {
                 val body = response.body()!!
-                val content = body.choices?.firstOrNull()?.message?.content
-                    ?: body.base_resp?.status_msg
-                    ?: "MiniMax VLM暂不支持此图片，请尝试使用DeepSeek或OpenAI平台"
-                SendMessageResponse(
+                val content = body.choices?.firstOrNull()?.message?.content ?: ""
+                return SendMessageResponse(
                     content = content,
                     platform = AIPlatform.MINIMAX,
                     model = model
                 )
             } else {
-                val errorBody = response.errorBody()?.string() ?: ""
-                val errorMsg = when {
-                    errorBody.contains("quota") || errorBody.contains("限额") ->
-                        "MiniMax VLM额度已用尽，请明日再试或使用其他平台"
-                    errorBody.contains("unauthorized") || errorBody.contains("权限") ->
-                        "MiniMax VLM权限不足，请检查API密钥是否正确"
-                    else ->
-                        "MiniMax VLM暂时不可用（错误码: ${response.code()}），请尝试使用DeepSeek或OpenAI平台解析图片"
-                }
-                SendMessageResponse(
-                    content = errorMsg,
-                    platform = AIPlatform.MINIMAX,
-                    model = model
-                )
+                val errorBody = response.errorBody()?.string() ?: "Unknown error"
+                throw Exception("VLM错误 ${response.code()}: $errorBody")
             }
         } catch (e: Exception) {
-            // VLM调用失败时返回友好的错误消息，而不是抛出异常
-            SendMessageResponse(
-                content = "MiniMax VLM暂时不可用，请尝试使用DeepSeek或OpenAI平台解析图片",
-                platform = AIPlatform.MINIMAX,
-                model = model
-            )
+            throw Exception("视觉模型调用失败: ${e.message}")
         }
     }
 
@@ -466,28 +426,35 @@ class AIServiceRepositoryImpl @Inject constructor(
                     parts.add(PartDto(text = msg.content))
                 }
 
-                // 处理图片附件
+                // 处理附件
                 msg.attachments.forEach { attachment ->
                     when (attachment.type) {
                         AttachmentType.IMAGE -> {
-                            val base64Data = when {
-                                !attachment.base64Data.isNullOrBlank() -> attachment.base64Data
-                                else -> null
-                            }
-                            base64Data?.let {
+                            if (!attachment.base64Data.isNullOrBlank()) {
                                 parts.add(PartDto(
                                     inlineData = InlineDataDto(
                                         mimeType = attachment.mimeType,
-                                        data = it
+                                        data = attachment.base64Data
                                     )
                                 ))
                             }
                         }
-                        // 其他类型附件以文本形式提及
                         else -> {
-                            parts.add(PartDto(
-                                text = "[附件: ${attachment.fileName}]"
-                            ))
+                            val textContent = when (attachment.type) {
+                                AttachmentType.PDF -> "[PDF文档: ${attachment.fileName}]"
+                                AttachmentType.ARCHIVE -> "[压缩包: ${attachment.fileName}]"
+                                else -> {
+                                    val decoded = attachment.base64Data?.let { base64 ->
+                                        try { String(Base64.getDecoder().decode(base64)) } catch (e: Exception) { null }
+                                    }
+                                    if (decoded != null && decoded.length < 10000) {
+                                        "【文件: ${attachment.fileName}】\n文件内容:\n---\n$decoded\n---"
+                                    } else {
+                                        "[文件: ${attachment.fileName}]"
+                                    }
+                                }
+                            }
+                            parts.add(PartDto(text = textContent))
                         }
                     }
                 }
@@ -518,7 +485,47 @@ class AIServiceRepositoryImpl @Inject constructor(
                 model = model
             )
         } else {
-            throw Exception("API Error: ${response.code()} - ${response.message()}")
+            val errorBody = response.errorBody()?.string() ?: "Unknown error"
+            throw Exception("API错误 ${response.code()}: $errorBody")
         }
     }
 }
+
+/**
+ * MiniMax VLM请求
+ */
+@kotlinx.serialization.Serializable
+data class MiniMaxVLMRequest(
+    val model: String,
+    val prompt: String,
+    val image_url: String? = null,
+    val temperature: Float? = null,
+    @kotlinx.serialization.SerialName("max_tokens")
+    val max_tokens: Int? = null
+)
+
+@kotlinx.serialization.Serializable
+data class MiniMaxVLMResponse(
+    val id: String? = null,
+    val choices: List<MiniMaxVLMChoice>? = null,
+    val usage: UsageDto? = null,
+    val model: String? = null
+)
+
+@kotlinx.serialization.Serializable
+data class MiniMaxVLMChoice(
+    val index: Int? = null,
+    val message: MiniMaxVLMMessage? = null
+)
+
+@kotlinx.serialization.Serializable
+data class MiniMaxVLMMessage(
+    val content: String? = null
+)
+
+@kotlinx.serialization.Serializable
+data class InlineDataDto(
+    @kotlinx.serialization.SerialName("mime_type")
+    val mimeType: String,
+    val data: String
+)
