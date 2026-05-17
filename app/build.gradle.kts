@@ -105,6 +105,9 @@ dependencies {
     // Security Crypto
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
 
+    // Error Prone Annotations (required by Tink)
+    compileOnly("com.google.errorprone:error_prone_annotations:2.18.0")
+
     // Splash Screen
     implementation("androidx.core:core-splashscreen:1.0.1")
 
