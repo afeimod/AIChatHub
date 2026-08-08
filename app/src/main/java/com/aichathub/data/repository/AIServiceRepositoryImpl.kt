@@ -1,23 +1,45 @@
 package com.aichathub.data.repository
 
-import com.aichathub.data.local.SecureKeyStorage
+import com.aichathub.data.local.TerminalLogManager
 import com.aichathub.data.model.*
 import com.aichathub.data.remote.AIServiceApi
 import com.aichathub.data.remote.MiniMaxVLMRequest
 import com.aichathub.domain.model.*
 import com.aichathub.domain.repository.AIServiceRepository
+import com.aichathub.domain.util.ContextManager
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * AI服务仓库实现
+ * AI 服务仓库实现 — 统一调度所有平台
+ *
+ * 平台分组：
+ *  - OpenAI 兼容（DEEPSEEK / OPENAI / MINIMAX / QWEN / ZHIPU / MOONSHOT / YI / BAICHUAN / DOUBAO / HUNYUAN / SPARK / SILICONFLOW / GROQ / TOGETHER / OPENROUTER / CUSTOM）
+ *  - Anthropic（ANTHROPIC）
+ *  - Gemini（GEMINI）
  */
 @Singleton
 class AIServiceRepositoryImpl @Inject constructor(
-    private val api: AIServiceApi
+    private val api: AIServiceApi,
+    private val httpClient: OkHttpClient,
+    private val json: kotlinx.serialization.json.Json,
+    private val logManager: TerminalLogManager
 ) : AIServiceRepository {
+
+    companion object {
+        private const val TAG = "AIService"
+    }
+
+    // ============ 非流式 ============
 
     override suspend fun sendMessage(
         platform: AIPlatform,
@@ -26,476 +48,279 @@ class AIServiceRepositoryImpl @Inject constructor(
         endpoint: String,
         messages: List<ChatMessage>,
         temperature: Float,
-        maxTokens: Int
+        maxTokens: Int,
+        systemPrompt: String,
+        customProvider: CustomProvider?
     ): Result<SendMessageResponse> = withContext(Dispatchers.IO) {
         try {
-            val result = when (platform) {
-                AIPlatform.DEEPSEEK -> sendDeepSeekMessage(apiKey, endpoint, model, messages, temperature, maxTokens)
-                AIPlatform.OPENAI -> sendOpenAIMessage(apiKey, endpoint, model, messages, temperature, maxTokens)
-                AIPlatform.MINIMAX -> sendMiniMaxMessage(apiKey, endpoint, model, messages, temperature, maxTokens)
-                AIPlatform.GEMINI -> sendGeminiMessage(apiKey, endpoint, model, messages, temperature, maxTokens)
+            logManager.request(TAG, "→ [${platform.displayName}] model=$model endpoint=$endpoint msgs=${messages.size}")
+            val result = when {
+                customProvider != null -> sendCustomMessage(customProvider, apiKey, model, messages, temperature, maxTokens, systemPrompt)
+                platform.apiStyle == ApiStyle.ANTHROPIC -> sendAnthropicMessage(apiKey, endpoint, model, messages, temperature, maxTokens, systemPrompt)
+                platform.apiStyle == ApiStyle.GEMINI -> sendGeminiMessage(apiKey, endpoint, model, messages, temperature, maxTokens, systemPrompt)
+                platform == AIPlatform.MINIMAX -> sendMiniMaxMessage(apiKey, endpoint, model, messages, temperature, maxTokens, systemPrompt)
+                else -> sendOpenAICompatibleMessage(platform, apiKey, endpoint, model, messages, temperature, maxTokens, systemPrompt)
             }
+            logManager.response(TAG, "← [${platform.displayName}] success len=${result.content.length}")
             Result.success(result)
         } catch (e: Exception) {
+            logManager.error(TAG, "✗ [${platform.displayName}] ${e.message}")
             Result.failure(e)
         }
     }
+
+    // ============ 流式 ============
+
+    override fun sendMessageStream(
+        platform: AIPlatform,
+        apiKey: String,
+        model: String,
+        endpoint: String,
+        messages: List<ChatMessage>,
+        temperature: Float,
+        maxTokens: Int,
+        systemPrompt: String,
+        customProvider: CustomProvider?
+    ): Flow<String> = flow {
+        logManager.request(TAG, "→> stream [${platform.displayName}] model=$model")
+        try {
+            val style = customProvider?.apiStyle ?: platform.apiStyle
+            when (style) {
+                ApiStyle.ANTHROPIC -> streamAnthropic(apiKey, endpoint, model, messages, temperature, maxTokens, systemPrompt).collect { emit(it) }
+                ApiStyle.GEMINI -> streamGemini(apiKey, endpoint, model, messages, temperature, maxTokens, systemPrompt).collect { emit(it) }
+                ApiStyle.OPENAI -> {
+                    if (platform == AIPlatform.MINIMAX && customProvider == null) {
+                        streamMiniMax(apiKey, endpoint, model, messages, temperature, maxTokens, systemPrompt).collect { emit(it) }
+                    } else {
+                        streamOpenAICompatible(customProvider, platform, apiKey, endpoint, model, messages, temperature, maxTokens, systemPrompt).collect { emit(it) }
+                    }
+                }
+            }
+            logManager.response(TAG, "←< stream [${platform.displayName}] done")
+        } catch (e: Exception) {
+            logManager.error(TAG, "✗< stream [${platform.displayName}] ${e.message}")
+            throw e
+        }
+    }
+
+    // ============ 连接测试 ============
 
     override suspend fun testConnection(
         platform: AIPlatform,
         apiKey: String,
         endpoint: String,
-        model: String
+        model: String,
+        customProvider: CustomProvider?
     ): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
-            val testMessages = listOf(
-                MessageDto("user", "Hi")
+            val testMessages = listOf(ChatMessage(role = MessageRole.USER, content = "Hi"))
+            val result = sendMessage(
+                platform = platform,
+                apiKey = apiKey,
+                model = model,
+                endpoint = endpoint,
+                messages = testMessages,
+                temperature = 0.7f,
+                maxTokens = 16,
+                systemPrompt = "",
+                customProvider = customProvider
             )
-
-            when (platform) {
-                AIPlatform.DEEPSEEK, AIPlatform.OPENAI -> {
-                    // 使用SimpleChatRequest进行测试连接
-                    val request = SimpleChatRequest(
-                        model = model,
-                        messages = testMessages,
-                        maxTokens = 5
-                    )
-                    val response = api.chatCompletion(
-                        url = endpoint,
-                        authorization = "Bearer $apiKey",
-                        request = request
-                    )
-                    if (response.isSuccessful) Result.success(true)
-                    else Result.failure(Exception("Connection failed: ${response.code()}"))
-                }
-                AIPlatform.MINIMAX -> {
-                    val request = MiniMaxChatRequest(
-                        model = model,
-                        messages = testMessages,
-                        maxTokens = 5
-                    )
-                    val response = api.miniMaxChat(
-                        url = endpoint,
-                        authorization = "Bearer $apiKey",
-                        request = request
-                    )
-                    if (response.isSuccessful) Result.success(true)
-                    else Result.failure(Exception("Connection failed: ${response.code()}"))
-                }
-                AIPlatform.GEMINI -> {
-                    val request = GeminiRequest(
-                        contents = listOf(
-                            ContentDto(parts = listOf(PartDto(text = "Hi")))
-                        ),
-                        generationConfig = GenerationConfigDto(maxOutputTokens = 5)
-                    )
-                    val response = api.geminiGenerateContent(
-                        url = endpoint.trimEnd('/') + "/$model:generateContent",
-                        apiKey = apiKey,
-                        request = request
-                    )
-                    if (response.isSuccessful) Result.success(true)
-                    else Result.failure(Exception("Connection failed: ${response.code()}"))
-                }
-            }
+            Result.success(result.isSuccess)
         } catch (e: Exception) {
             Result.failure(e)
         }
     }
 
-    private suspend fun sendDeepSeekMessage(
+    // ============ OpenAI 兼容（含 DeepSeek / Qwen / Zhipu / Moonshot / Yi / Baichuan / Doubao / Hunyuan / Spark / SiliconFlow / Groq / Together / OpenRouter / MiniMax / CUSTOM） ============
+
+    private suspend fun sendOpenAICompatibleMessage(
+        platform: AIPlatform,
         apiKey: String,
         endpoint: String,
         model: String,
         messages: List<ChatMessage>,
         temperature: Float,
-        maxTokens: Int
+        maxTokens: Int,
+        systemPrompt: String
     ): SendMessageResponse {
-        // DeepSeek使用与OpenAI相同的API格式，复用buildOpenAIRequest
-        // DeepSeek模型支持vision功能（当发送图片时）
-        val request = buildOpenAIRequest(model, messages, temperature, maxTokens, supportsVision = true)
-
-        val response = api.chatCompletion(
-            url = endpoint,
-            authorization = "Bearer $apiKey",
-            request = request
-        )
-
-        if (response.isSuccessful) {
-            val body = response.body()!!
-            // 安全地获取内容，处理可能的null情况
-            val content = body.choices.firstOrNull()?.message?.content?.trim() ?: ""
-            return SendMessageResponse(
-                content = content,
-                platform = AIPlatform.DEEPSEEK,
-                model = model,
-                usage = body.usage?.let {
-                    TokenUsage(it.promptTokens, it.completionTokens, it.totalTokens)
-                }
-            )
-        } else {
-            val errorBody = response.errorBody()?.string() ?: ""
-            throw Exception("API Error: ${response.code()} - $errorBody")
+        val request = buildOpenAIRequest(model, messages, temperature, maxTokens, systemPrompt, stream = false)
+        val response = api.chatCompletion(endpoint, "Bearer $apiKey", request)
+        if (!response.isSuccessful) {
+            val errBody = response.errorBody()?.string() ?: ""
+            throw RuntimeException("HTTP ${response.code()}: $errBody".take(500))
         }
+        val body = response.body() ?: throw RuntimeException("Empty response body")
+        val content = body.choices.firstOrNull()?.message?.content ?: ""
+        val usage = body.usage?.let {
+            TokenUsage(it.promptTokens, it.completionTokens, it.totalTokens)
+        }
+        return SendMessageResponse(content = content, platform = platform, model = model, usage = usage)
     }
 
-    private suspend fun sendOpenAIMessage(
+    private fun streamOpenAICompatible(
+        customProvider: CustomProvider?,
+        platform: AIPlatform,
         apiKey: String,
         endpoint: String,
         model: String,
         messages: List<ChatMessage>,
         temperature: Float,
-        maxTokens: Int
-    ): SendMessageResponse {
-        // 构建请求
-        // OpenAI GPT-4o系列支持vision功能
-        val request = buildOpenAIRequest(model, messages, temperature, maxTokens, supportsVision = true)
+        maxTokens: Int,
+        systemPrompt: String
+    ): Flow<String> = flow {
+        val request = buildOpenAIRequest(model, messages, temperature, maxTokens, systemPrompt, stream = true)
+        val payload = json.encodeToString(SimpleChatRequest.serializer(), request)
+        val reqBuilder = Request.Builder().url(endpoint).post(payload.toRequestBody("application/json".toMediaType()))
+        // 鉴权头：自定义平台支持
+        val authHeader = customProvider?.authHeader ?: platform.authHeader
+        val authPrefix = customProvider?.authPrefix ?: platform.authPrefix
+        reqBuilder.header(authHeader, "$authPrefix$apiKey")
+        customProvider?.extraHeaders?.forEach { (k, v) -> reqBuilder.header(k, v) }
 
-        val response = api.chatCompletion(
-            url = endpoint,
-            authorization = "Bearer $apiKey",
-            request = request
-        )
-
-        if (response.isSuccessful) {
-            val body = response.body()!!
-            val content = body.choices.firstOrNull()?.message?.content ?: ""
-            return SendMessageResponse(
-                content = content,
-                platform = AIPlatform.OPENAI,
-                model = model,
-                usage = body.usage?.let {
-                    TokenUsage(it.promptTokens, it.completionTokens, it.totalTokens)
-                }
-            )
-        } else {
-            throw Exception("API Error: ${response.code()} - ${response.message()}")
+        executeSse(reqBuilder.build()) { line ->
+            parseOpenAIStreamChunk(line)?.let { emit(it) }
         }
     }
 
-    /**
-     * 构建OpenAI/DeepSeek 兼容的聊天请求
-     * 支持纯文本消息和多模态消息（vision API）
-     */
     private fun buildOpenAIRequest(
         model: String,
         messages: List<ChatMessage>,
         temperature: Float,
         maxTokens: Int,
-        supportsVision: Boolean = false
+        systemPrompt: String,
+        stream: Boolean
     ): SimpleChatRequest {
-        // 检测模型是否支持vision（GPT-4o, GPT-4V等支持多模态）
-        val modelSupportsVision = supportsVision || model.contains("gpt-4o") || model.contains("vision") || model.contains("4o-mini")
-        
-        val messagesList = messages.map { chatMessage ->
-            if (chatMessage.attachments.isEmpty()) {
-                // 纯文本消息
-                MessageDto(
-                    role = chatMessage.role.name.lowercase(),
-                    content = chatMessage.content
-                )
-            } else {
-                // 多模态消息：构建包含附件的文本内容
-                val textParts = mutableListOf<String>()
-                
-                // 添加文本内容
-                if (chatMessage.content.isNotBlank()) {
-                    textParts.add(chatMessage.content)
-                }
-                
-                // 添加附件信息
-                chatMessage.attachments.forEach { attachment ->
-                    when (attachment.type) {
-                        AttachmentType.IMAGE -> {
-                            // 图片 - 如果有base64数据则包含
-                            if (!attachment.base64Data.isNullOrBlank()) {
-                                textParts.add("[图片: ${attachment.fileName}，base64数据已附加]")
-                            } else {
-                                textParts.add("[图片: ${attachment.fileName}]")
-                            }
-                        }
-                        AttachmentType.PDF -> {
-                            textParts.add("[PDF文档: ${attachment.fileName}，请分析内容]")
-                        }
-                        AttachmentType.DOCUMENT -> {
-                            // 尝试解码base64获取文本文档内容
-                            val textContent = try {
-                                if (!attachment.base64Data.isNullOrBlank()) {
-                                    val bytes = android.util.Base64.decode(attachment.base64Data, android.util.Base64.DEFAULT)
-                                    String(bytes, Charsets.UTF_8)
-                                } else {
-                                    null
-                                }
-                            } catch (e: Exception) {
-                                null
-                            }
-                            
-                            if (textContent != null && textContent.isNotBlank()) {
-                                textParts.add("[文档内容如下]\n${textContent}")
-                            } else {
-                                textParts.add("[文档: ${attachment.fileName}]")
-                            }
-                        }
-                        AttachmentType.ARCHIVE -> {
-                            textParts.add("[压缩包: ${attachment.fileName}]")
-                        }
-                        AttachmentType.OTHER -> {
-                            textParts.add("[附件: ${attachment.fileName}]")
-                        }
-                    }
-                }
-                
-                MessageDto(
-                    role = chatMessage.role.name.lowercase(),
-                    content = textParts.joinToString("\n")
-                )
-            }
+        val msgList = mutableListOf<MessageDto>()
+        if (systemPrompt.isNotBlank()) {
+            msgList.add(MessageDto(role = "system", content = systemPrompt))
         }
-        
+        ContextManager.toApiMessages(messages).forEach { m ->
+            val content = buildOpenAIContent(m)
+            msgList.add(MessageDto(role = mapRole(m.role), content = content))
+        }
         return SimpleChatRequest(
             model = model,
-            messages = messagesList,
+            messages = msgList,
             temperature = temperature,
-            maxTokens = maxTokens
+            maxTokens = maxTokens,
+            stream = stream
         )
     }
 
-    private suspend fun sendMiniMaxMessage(
+    /** 构造 OpenAI content — 文本 + 图片(若附件为 IMAGE 则使用 data URI 文本嵌入；多数 OpenAI 兼容平台支持) */
+    private fun buildOpenAIContent(message: ChatMessage): String {
+        if (message.attachments.isEmpty()) return message.content
+        val sb = StringBuilder(message.content)
+        message.attachments.forEach { att ->
+            sb.append("\n\n")
+            when (att.type) {
+                AttachmentType.IMAGE -> {
+                    val dataUri = att.base64Data?.let { "data:${att.mimeType};base64,$it" } ?: att.url ?: ""
+                    sb.append("[图片: ${att.fileName}] $dataUri")
+                }
+                AttachmentType.PDF, AttachmentType.DOCUMENT -> {
+                    // 仅附加文件名，避免无效 UTF-8 文本污染上下文
+                    sb.append("[附件: ${att.fileName} (${att.mimeType})]")
+                }
+                else -> sb.append("[附件: ${att.fileName}]")
+            }
+        }
+        return sb.toString()
+    }
+
+    private fun parseOpenAIStreamChunk(line: String): String? {
+        if (!line.startsWith("data:")) return null
+        val data = line.removePrefix("data:").trim()
+        if (data == "[DONE]" || data.isEmpty()) return null
+        return try {
+            val chunk = json.decodeFromString(OpenAIStreamChunk.serializer(), data)
+            chunk.choices.firstOrNull()?.delta?.content
+        } catch (_: Exception) { null }
+    }
+
+    // ============ Anthropic Claude ============
+
+    private suspend fun sendAnthropicMessage(
         apiKey: String,
         endpoint: String,
         model: String,
         messages: List<ChatMessage>,
         temperature: Float,
-        maxTokens: Int
+        maxTokens: Int,
+        systemPrompt: String
     ): SendMessageResponse {
-        // 获取最后一条用户消息，检查是否有附件
-        val lastUserMessage = messages.filter { it.role == MessageRole.USER }.lastOrNull()
-        val hasImageInLastMessage = lastUserMessage?.attachments?.any { it.type == AttachmentType.IMAGE } == true
-
-        if (hasImageInLastMessage) {
-            // 仅当最后一条用户消息包含图片时，才使用VLM端点
-            return sendMiniMaxVLMMessage(apiKey, model, messages)
+        val request = buildAnthropicRequest(model, messages, temperature, maxTokens, systemPrompt, stream = false)
+        val response = api.anthropicMessages(endpoint, apiKey, "2023-06-01", request)
+        if (!response.isSuccessful) {
+            val errBody = response.errorBody()?.string() ?: ""
+            throw RuntimeException("HTTP ${response.code()}: $errBody".take(500))
         }
-
-        // 构建消息，包含附件信息
-        val miniMaxMessages = messages.map { chatMessage ->
-            val content = buildMessageContent(chatMessage)
-            MessageDto(chatMessage.role.name.lowercase(), content)
-        }
-
-        val request = MiniMaxChatRequest(
-            model = model,
-            messages = miniMaxMessages,
-            temperature = temperature,
-            maxTokens = maxTokens
-        )
-
-        val response = api.miniMaxChat(
-            url = endpoint,
-            authorization = "Bearer $apiKey",
-            request = request
-        )
-
-        if (response.isSuccessful) {
-            val body = response.body()!!
-            
-            // 安全地获取内容
-            val content = try {
-                // 尝试从 messages 格式获取内容
-                val contentFromMessages = body.choices.firstOrNull()?.messages?.lastOrNull()?.content
-                // 尝试从 message 格式获取内容
-                val contentFromMessage = body.choices.firstOrNull()?.message?.content
-                contentFromMessages ?: contentFromMessage ?: ""
-            } catch (e: Exception) {
-                // 如果解析失败，返回空字符串
-                ""
-            }
-            
-            return SendMessageResponse(
-                content = content,
-                platform = AIPlatform.MINIMAX,
-                model = model,
-                usage = body.usage?.let {
-                    TokenUsage(it.promptTokens, it.completionTokens, it.totalTokens)
-                }
-            )
-        } else {
-            // 尝试读取错误信息
-            val errorBody = response.errorBody()?.string() ?: ""
-            throw Exception("API Error ${response.code()}: $errorBody")
-        }
+        val body = response.body() ?: throw RuntimeException("Empty Anthropic response")
+        val content = body.content.firstOrNull()?.text ?: ""
+        val usage = body.usage?.let { TokenUsage(it.inputTokens, it.outputTokens, it.inputTokens + it.outputTokens) }
+        return SendMessageResponse(content = content, platform = AIPlatform.ANTHROPIC, model = model, usage = usage)
     }
 
-    /**
-     * 构建消息内容，包含附件信息的文本描述
-     */
-    private fun buildMessageContent(chatMessage: ChatMessage): String {
-        var content = chatMessage.content
-        
-        // 如果有附件，添加附件信息
-        if (chatMessage.attachments.isNotEmpty()) {
-            val attachmentDescriptions = chatMessage.attachments.map { attachment ->
-                when (attachment.type) {
-                    AttachmentType.IMAGE -> "[用户发送了图片: ${attachment.fileName}，请分析这张图片的内容]"
-                    AttachmentType.PDF -> {
-                        // 尝试解码PDF的base64内容
-                        val pdfContent = try {
-                            if (!attachment.base64Data.isNullOrBlank()) {
-                                val bytes = android.util.Base64.decode(attachment.base64Data, android.util.Base64.DEFAULT)
-                                String(bytes, Charsets.UTF_8)
-                            } else {
-                                null
-                            }
-                        } catch (e: Exception) {
-                            null
-                        }
-                        if (pdfContent != null && pdfContent.isNotBlank()) {
-                            // 完全不限制PDF内容长度
-                            "[用户发送了PDF文档: ${attachment.fileName}，内容如下：\n${pdfContent}]"
-                        } else {
-                            "[用户发送了PDF文档: ${attachment.fileName}]"
-                        }
-                    }
-                    AttachmentType.DOCUMENT -> {
-                        // 尝试解码文档的base64内容
-                        val docContent = try {
-                            if (!attachment.base64Data.isNullOrBlank()) {
-                                val bytes = android.util.Base64.decode(attachment.base64Data, android.util.Base64.DEFAULT)
-                                String(bytes, Charsets.UTF_8)
-                            } else {
-                                null
-                            }
-                        } catch (e: Exception) {
-                            null
-                        }
-                        if (docContent != null && docContent.isNotBlank()) {
-                            // 完全不限制文档长度，发送完整内容
-                            "[用户发送了文档: ${attachment.fileName}，内容如下：\n${docContent}]"
-                        } else {
-                            "[用户发送了文档: ${attachment.fileName}]"
-                        }
-                    }
-                    AttachmentType.ARCHIVE -> {
-                        // 尝试解码压缩包的base64内容
-                        val archiveContent = try {
-                            if (!attachment.base64Data.isNullOrBlank()) {
-                                val bytes = android.util.Base64.decode(attachment.base64Data, android.util.Base64.DEFAULT)
-                                String(bytes, Charsets.UTF_8)
-                            } else {
-                                null
-                            }
-                        } catch (e: Exception) {
-                            null
-                        }
-                        if (archiveContent != null && archiveContent.isNotBlank()) {
-                            // 完全不限制压缩包内容长度
-                            "[用户发送了压缩包: ${attachment.fileName}，内容如下：\n${archiveContent}]"
-                        } else {
-                            "[用户发送了压缩包: ${attachment.fileName}]"
-                        }
-                    }
-                    AttachmentType.OTHER -> "[用户发送了文件: ${attachment.fileName}]"
-                }
-            }.joinToString("\n")
-            
-            if (content.isNotBlank()) {
-                content = "$attachmentDescriptions\n\n用户消息: $content"
-            } else {
-                content = attachmentDescriptions
-            }
-        }
-        
-        return content
-    }
-
-    /**
-     * 使用MiniMax VLM端点发送图片消息
-     */
-    private suspend fun sendMiniMaxVLMMessage(
+    private fun streamAnthropic(
         apiKey: String,
+        endpoint: String,
         model: String,
-        messages: List<ChatMessage>
-    ): SendMessageResponse {
-        // 获取最后一条用户消息及其附件
-        val userMessage = messages.filter { it.role == MessageRole.USER }.lastOrNull()
-            ?: return SendMessageResponse(
-                content = "错误：没有找到用户消息",
-                platform = AIPlatform.MINIMAX,
-                model = model
-            )
-
-        val prompt = userMessage.content.ifBlank { "请分析这张图片" }
-
-        // 获取图片数据
-        val imageAttachments = userMessage.attachments.filter { it.type == AttachmentType.IMAGE }
-        val firstImage = imageAttachments.firstOrNull()
-
-        if (firstImage == null || firstImage.base64Data.isNullOrBlank()) {
-            return SendMessageResponse(
-                content = "错误：没有找到图片数据，请确保图片已正确上传",
-                platform = AIPlatform.MINIMAX,
-                model = model
-            )
-        }
-
-        // 构建图片数据 - 确保使用正确的格式
-        val imageData = firstImage.base64Data
-        val mimeType = firstImage.mimeType.ifBlank { "image/jpeg" }
-
-        // MiniMax VLM API 需要一个特殊格式的 prompt，包含 <image> 标记
-        val fullPrompt = "用户发送了一张图片: ${firstImage.fileName}\n\n请分析这张图片的内容，详细描述图片中有什么。\n\n用户的问题: ${prompt.ifBlank { "请详细描述这张图片" }}"
-
-        // 构建VLM请求 - image_url 可以是URL或base64数据
-        val vlmRequest = MiniMaxVLMRequest(
-            prompt = fullPrompt,
-            imageUrl = "data:$mimeType;base64,$imageData"
-        )
-
-        return try {
-            val response = api.miniMaxVLM(
-                url = "https://api.minimax.chat/v1/coding_plan/vlm",
-                authorization = "Bearer $apiKey",
-                request = vlmRequest
-            )
-
-            if (response.isSuccessful) {
-                val body = response.body()!!
-                // 从响应中提取内容
-                val content = body.choices?.firstOrNull()?.message?.content?.trim()
-                    ?: body.base_resp?.status_msg?.trim()
-                    ?: "图片分析完成，但未收到详细回复"
-                SendMessageResponse(
-                    content = content,
-                    platform = AIPlatform.MINIMAX,
-                    model = model
-                )
-            } else {
-                val errorBody = response.errorBody()?.string() ?: ""
-                val errorMsg = when {
-                    errorBody.contains("quota") || errorBody.contains("限额") ->
-                        "MiniMax VLM额度已用尽，请明日再试或使用其他平台"
-                    errorBody.contains("unauthorized") || errorBody.contains("权限") ->
-                        "MiniMax VLM权限不足，请检查API密钥是否正确"
-                    errorBody.contains("invalid") || errorBody.contains("参数") ->
-                        "MiniMax VLM不支持此图片格式，请尝试使用DeepSeek或OpenAI平台"
-                    else ->
-                        "MiniMax VLM暂时不可用（错误码: ${response.code()}），请尝试使用DeepSeek或OpenAI平台解析图片"
-                }
-                SendMessageResponse(
-                    content = errorMsg,
-                    platform = AIPlatform.MINIMAX,
-                    model = model
-                )
-            }
-        } catch (e: Exception) {
-            // VLM调用失败时返回友好的错误消息，而不是抛出异常
-            SendMessageResponse(
-                content = "MiniMax VLM暂时不可用，请尝试使用DeepSeek或OpenAI平台解析图片。错误信息: ${e.message}",
-                platform = AIPlatform.MINIMAX,
-                model = model
-            )
+        messages: List<ChatMessage>,
+        temperature: Float,
+        maxTokens: Int,
+        systemPrompt: String
+    ): Flow<String> = flow {
+        val request = buildAnthropicRequest(model, messages, temperature, maxTokens, systemPrompt, stream = true)
+        val payload = json.encodeToString(AnthropicRequest.serializer(), request)
+        val req = Request.Builder()
+            .url(endpoint)
+            .post(payload.toRequestBody("application/json".toMediaType()))
+            .header("x-api-key", apiKey)
+            .header("anthropic-version", "2023-06-01")
+            .build()
+        executeSse(req) { line ->
+            parseAnthropicStreamChunk(line)?.let { emit(it) }
         }
     }
+
+    private fun buildAnthropicRequest(
+        model: String,
+        messages: List<ChatMessage>,
+        temperature: Float,
+        maxTokens: Int,
+        systemPrompt: String,
+        stream: Boolean
+    ): AnthropicRequest {
+        val msgs = ContextManager.toApiMessages(messages).map { m ->
+            AnthropicMessage(
+                role = if (m.role == MessageRole.USER) "user" else "assistant",
+                content = m.content.ifBlank { "(empty)" }
+            )
+        }
+        return AnthropicRequest(
+            model = model,
+            messages = msgs,
+            maxTokens = maxTokens.coerceAtLeast(1),
+            temperature = temperature,
+            system = systemPrompt.ifBlank { null },
+            stream = stream
+        )
+    }
+
+    private fun parseAnthropicStreamChunk(line: String): String? {
+        if (!line.startsWith("data:")) return null
+        val data = line.removePrefix("data:").trim()
+        if (data.isEmpty()) return null
+        return try {
+            val evt = json.decodeFromString(AnthropicStreamEvent.serializer(), data)
+            when (evt.type) {
+                "content_block_delta" -> evt.delta?.text
+                else -> null
+            }
+        } catch (_: Exception) { null }
+    }
+
+    // ============ Gemini ============
 
     private suspend fun sendGeminiMessage(
         apiKey: String,
@@ -503,71 +328,171 @@ class AIServiceRepositoryImpl @Inject constructor(
         model: String,
         messages: List<ChatMessage>,
         temperature: Float,
-        maxTokens: Int
+        maxTokens: Int,
+        systemPrompt: String
     ): SendMessageResponse {
-        val contents = messages
-            .filter { it.role == MessageRole.USER || it.role == MessageRole.ASSISTANT }
-            .map { msg ->
-                val parts = mutableListOf<PartDto>()
-
-                // 添加文本内容
-                if (msg.content.isNotBlank()) {
-                    parts.add(PartDto(text = msg.content))
-                }
-
-                // 处理图片附件
-                msg.attachments.forEach { attachment ->
-                    when (attachment.type) {
-                        AttachmentType.IMAGE -> {
-                            val base64Data = when {
-                                !attachment.base64Data.isNullOrBlank() -> attachment.base64Data
-                                else -> null
-                            }
-                            base64Data?.let {
-                                parts.add(PartDto(
-                                    inlineData = InlineDataDto(
-                                        mimeType = attachment.mimeType,
-                                        data = it
-                                    )
-                                ))
-                            }
-                        }
-                        // 其他类型附件以文本形式提及
-                        else -> {
-                            parts.add(PartDto(
-                                text = "[附件: ${attachment.fileName}]"
-                            ))
-                        }
-                    }
-                }
-
-                ContentDto(parts = parts)
-            }
-
-        val request = GeminiRequest(
-            contents = contents,
-            generationConfig = GenerationConfigDto(
-                temperature = temperature,
-                maxOutputTokens = maxTokens
-            )
-        )
-
-        val response = api.geminiGenerateContent(
-            url = "${endpoint.trimEnd('/')}/$model:generateContent",
-            apiKey = apiKey,
-            request = request
-        )
-
-        if (response.isSuccessful) {
-            val body = response.body()!!
-            val content = body.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text ?: ""
-            return SendMessageResponse(
-                content = content,
-                platform = AIPlatform.GEMINI,
-                model = model
-            )
-        } else {
-            throw Exception("API Error: ${response.code()} - ${response.message()}")
+        val request = buildGeminiRequest(messages, temperature, maxTokens, systemPrompt)
+        val url = "${endpoint.trimEnd('/')}/$model:generateContent"
+        val response = api.geminiGenerateContent(url, apiKey, request)
+        if (!response.isSuccessful) {
+            val errBody = response.errorBody()?.string() ?: ""
+            throw RuntimeException("HTTP ${response.code()}: $errBody".take(500))
         }
+        val body = response.body() ?: throw RuntimeException("Empty Gemini response")
+        val content = body.candidates?.firstOrNull()?.content?.parts?.joinToString("") { it.text ?: "" } ?: ""
+        val usage = body.usageMetadata?.let {
+            TokenUsage(it.promptTokenCount, it.candidatesTokenCount, it.totalTokenCount)
+        }
+        return SendMessageResponse(content = content, platform = AIPlatform.GEMINI, model = model, usage = usage)
+    }
+
+    private fun streamGemini(
+        apiKey: String,
+        endpoint: String,
+        model: String,
+        messages: List<ChatMessage>,
+        temperature: Float,
+        maxTokens: Int,
+        systemPrompt: String
+    ): Flow<String> = flow {
+        val request = buildGeminiRequest(messages, temperature, maxTokens, systemPrompt)
+        val payload = json.encodeToString(GeminiRequest.serializer(), request)
+        val url = "${endpoint.trimEnd('/')}/$model:streamGenerateContent?alt=sse&key=${apiKey}"
+        val req = Request.Builder().url(url).post(payload.toRequestBody("application/json".toMediaType())).build()
+        executeSse(req) { line ->
+            parseGeminiStreamChunk(line, json)?.let { emit(it) }
+        }
+    }
+
+    private fun buildGeminiRequest(
+        messages: List<ChatMessage>,
+        temperature: Float,
+        maxTokens: Int,
+        systemPrompt: String
+    ): GeminiRequest {
+        val contents = ContextManager.toApiMessages(messages).map { m ->
+            val parts = mutableListOf<PartDto>()
+            if (m.content.isNotBlank()) parts.add(PartDto(text = m.content))
+            m.attachments.filter { it.type == AttachmentType.IMAGE && it.base64Data != null }.forEach { att ->
+                parts.add(PartDto(inlineData = InlineDataDto(mimeType = att.mimeType, data = att.base64Data!!)))
+            }
+            ContentDto(parts = parts, role = if (m.role == MessageRole.USER) "user" else "model")
+        }.filter { it.parts.isNotEmpty() }
+        val sysContent = if (systemPrompt.isNotBlank()) ContentDto(parts = listOf(PartDto(text = systemPrompt))) else null
+        return GeminiRequest(
+            contents = contents,
+            generationConfig = GenerationConfigDto(temperature = temperature, maxOutputTokens = maxTokens),
+            systemInstruction = sysContent
+        )
+    }
+
+    private fun parseGeminiStreamChunk(line: String, json: kotlinx.serialization.json.Json): String? {
+        if (!line.startsWith("data:")) return null
+        val data = line.removePrefix("data:").trim()
+        if (data.isEmpty()) return null
+        return try {
+            val resp = json.decodeFromString(GeminiResponse.serializer(), data)
+            resp.candidates?.firstOrNull()?.content?.parts?.joinToString("") { it.text ?: "" }?.takeIf { it.isNotEmpty() }
+        } catch (_: Exception) { null }
+    }
+
+    // ============ MiniMax（普通文本走 OpenAI 兼容；带图走 VLM） ============
+
+    private suspend fun sendMiniMaxMessage(
+        apiKey: String,
+        endpoint: String,
+        model: String,
+        messages: List<ChatMessage>,
+        temperature: Float,
+        maxTokens: Int,
+        systemPrompt: String
+    ): SendMessageResponse {
+        // 若最后一条用户消息含图片附件，走 VLM 端点
+        val lastUserMsg = messages.lastOrNull { it.role == MessageRole.USER }
+        val hasImage = lastUserMsg?.attachments?.any { it.type == AttachmentType.IMAGE && it.base64Data != null } == true
+        if (hasImage) {
+            return sendMiniMaxVLMMessage(apiKey, model, lastUserMsg!!)
+        }
+        // 否则走 OpenAI 兼容
+        return sendOpenAICompatibleMessage(AIPlatform.MINIMAX, apiKey, endpoint, model, messages, temperature, maxTokens, systemPrompt)
+    }
+
+    private suspend fun sendMiniMaxVLMMessage(apiKey: String, model: String, userMsg: ChatMessage): SendMessageResponse {
+        val imageAtt = userMsg.attachments.first { it.type == AttachmentType.IMAGE && it.base64Data != null }
+        val dataUri = "data:${imageAtt.mimeType};base64,${imageAtt.base64Data}"
+        val vlmReq = MiniMaxVLMRequest(prompt = userMsg.content, imageUrl = dataUri)
+        val vlmUrl = "https://api.minimax.chat/v1/coding_plan/vlm"
+        val response = api.miniMaxVLM(vlmUrl, "Bearer $apiKey", vlmReq)
+        if (!response.isSuccessful) {
+            val errBody = response.errorBody()?.string() ?: ""
+            throw RuntimeException("MiniMax VLM HTTP ${response.code()}: $errBody".take(500))
+        }
+        val body = response.body() ?: throw RuntimeException("Empty VLM response")
+        val content = body.choices.firstOrNull()?.message?.content ?: ""
+        return SendMessageResponse(content = content, platform = AIPlatform.MINIMAX, model = model, usage = null)
+    }
+
+    private fun streamMiniMax(
+        apiKey: String,
+        endpoint: String,
+        model: String,
+        messages: List<ChatMessage>,
+        temperature: Float,
+        maxTokens: Int,
+        systemPrompt: String
+    ): Flow<String> = flow {
+        // MiniMax 流式走 OpenAI 兼容（带 stream=true）
+        val request = buildOpenAIRequest(model, messages, temperature, maxTokens, systemPrompt, stream = true)
+        val payload = json.encodeToString(SimpleChatRequest.serializer(), request)
+        val req = Request.Builder().url(endpoint).post(payload.toRequestBody("application/json".toMediaType()))
+            .header("Authorization", "Bearer $apiKey")
+            .build()
+        executeSse(req) { line -> parseOpenAIStreamChunk(line)?.let { emit(it) } }
+    }
+
+    // ============ 自定义平台 ============
+
+    private suspend fun sendCustomMessage(
+        provider: CustomProvider,
+        apiKey: String,
+        model: String,
+        messages: List<ChatMessage>,
+        temperature: Float,
+        maxTokens: Int,
+        systemPrompt: String
+    ): SendMessageResponse {
+        val key = apiKey.ifBlank { provider.apiKey }
+        return when (provider.apiStyle) {
+            ApiStyle.OPENAI -> sendOpenAICompatibleMessage(AIPlatform.CUSTOM, key, provider.endpoint, model, messages, temperature, maxTokens, systemPrompt)
+            ApiStyle.ANTHROPIC -> sendAnthropicMessage(key, provider.endpoint, model, messages, temperature, maxTokens, systemPrompt)
+            ApiStyle.GEMINI -> sendGeminiMessage(key, provider.endpoint, model, messages, temperature, maxTokens, systemPrompt)
+        }
+    }
+
+    // ============ SSE 通用执行 ============
+
+    private suspend inline fun executeSse(request: Request, crossinline onLine: (String) -> Unit) = withContext(Dispatchers.IO) {
+        val response: Response = httpClient.newCall(request).execute()
+        response.use { resp ->
+            if (!resp.isSuccessful) {
+                val errBody = resp.body?.string() ?: ""
+                throw RuntimeException("SSE HTTP ${resp.code}: ${errBody.take(500)}")
+            }
+            val source = resp.body?.source() ?: throw RuntimeException("Empty stream body")
+            while (!source.exhausted()) {
+                val line = source.readUtf8Line() ?: break
+                if (line.isBlank()) continue
+                logManager.stream(TAG, line.take(200))
+                onLine(line)
+            }
+        }
+    }
+
+    // ============ 工具 ============
+
+    private fun mapRole(role: MessageRole): String = when (role) {
+        MessageRole.USER -> "user"
+        MessageRole.ASSISTANT -> "assistant"
+        MessageRole.SYSTEM -> "system"
     }
 }

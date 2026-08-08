@@ -5,6 +5,20 @@
     <string name="platform_minimax">MiniMax</string>
     <string name="platform_openai">OpenAI (GPT)</string>
     <string name="platform_gemini">Google Gemini</string>
+    <string name="platform_anthropic">Anthropic Claude</string>
+    <string name="platform_qwen">通义千问 (Qwen)</string>
+    <string name="platform_zhipu">智谱 GLM</string>
+    <string name="platform_moonshot">Moonshot (Kimi)</string>
+    <string name="platform_yi">零一万物 (Yi)</string>
+    <string name="platform_baichuan">百川 (Baichuan)</string>
+    <string name="platform_doubao">豆包 (Doubao)</string>
+    <string name="platform_hunyuan">腾讯混元</string>
+    <string name="platform_spark">讯飞星火</string>
+    <string name="platform_siliconflow">SiliconFlow</string>
+    <string name="platform_groq">Groq</string>
+    <string name="platform_together">Together AI</string>
+    <string name="platform_openrouter">OpenRouter</string>
+    <string name="platform_custom">自定义平台</string>
     <string name="input_hint">输入您的消息...</string>
     <string name="send">发送</string>
     <string name="new_chat">新对话</string>
@@ -19,4 +33,16 @@
     <string name="no_messages">暂无消息</string>
     <string name="start_chat">开始与AI对话</string>
     <string name="select_platform">请先配置API密钥</string>
+    <string name="terminal">终端</string>
+    <string name="workspace">工作目录</string>
+    <string name="custom_provider">自定义平台</string>
+    <string name="system_prompt">系统提示词</string>
+    <string name="streaming">流式响应</string>
+    <string name="stop_generation">停止生成</string>
+    <string name="copy">复制</string>
+    <string name="regenerate">重新生成</string>
+    <string name="delete_message">删除消息</string>
+    <string name="context_strategy">上下文策略</string>
+    <string name="unlimited_context">无限制上下文</string>
+    <string name="markdown_render">Markdown渲染</string>
 </resources>

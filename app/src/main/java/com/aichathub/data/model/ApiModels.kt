@@ -6,8 +6,7 @@ import kotlinx.serialization.Serializable
 // ==================== OpenAI / DeepSeek API Models ====================
 
 /**
- * 通用的聊天请求格式
- * 支持纯文本消息和多模态消息（vision API）
+ * 通用的聊天请求格式（带流式支持）
  */
 @Serializable
 data class FlexibleChatRequest(
@@ -21,10 +20,6 @@ data class FlexibleChatRequest(
     val stream: Boolean = false
 )
 
-/**
- * 灵活的OpenAI消息格式
- * 支持纯文本消息（content为字符串）和多模态消息（content为对象列表）
- */
 @Serializable
 data class FlexibleMessageDto(
     val role: String,
@@ -32,7 +27,7 @@ data class FlexibleMessageDto(
 )
 
 /**
- * 简化版的聊天请求，用于纯文本消息
+ * 纯文本聊天请求（OpenAI 兼容 — 同时支持 stream 字段）
  */
 @Serializable
 data class SimpleChatRequest(
@@ -40,7 +35,10 @@ data class SimpleChatRequest(
     val messages: List<MessageDto>,
     val temperature: Float? = null,
     @SerialName("max_tokens")
-    val maxTokens: Int? = null
+    val maxTokens: Int? = null,
+    @SerialName("top_p")
+    val topP: Float? = null,
+    val stream: Boolean = false
 )
 
 @Serializable
@@ -54,7 +52,7 @@ data class MessageDto(
  */
 @Serializable
 data class MultimodalContentItem(
-    val type: String,  // "text" or "image_url"
+    val type: String,
     val text: String? = null,
     @SerialName("image_url")
     val imageUrl: ImageUrlDto? = null
@@ -76,7 +74,7 @@ data class MultimodalMessageDto(
 )
 
 /**
- * 多模态聊天请求（支持vision API）
+ * 多模态聊天请求（vision + stream）
  */
 @Serializable
 data class MultimodalOpenAIChatRequest(
@@ -90,22 +88,10 @@ data class MultimodalOpenAIChatRequest(
     val stream: Boolean = false
 )
 
-/**
- * 灵活的消息内容：可以是字符串（纯文本）或内容项列表（多模态）
- */
-@Serializable
-sealed class FlexibleContent {
-    @Serializable
-    data class TextContent(val text: String) : FlexibleContent()
-
-    @Serializable
-    data class MultimodalContent(val items: List<MultimodalContentItem>) : FlexibleContent()
-}
-
 @Serializable
 data class OpenAIChatResponse(
     val id: String? = null,
-    val choices: List<ChoiceDto>,
+    val choices: List<ChoiceDto> = emptyList(),
     val usage: UsageDto? = null,
     val model: String? = null,
     @SerialName("created")
@@ -114,7 +100,7 @@ data class OpenAIChatResponse(
 
 @Serializable
 data class ChoiceDto(
-    val index: Int,
+    val index: Int = 0,
     val message: MessageDto,
     @SerialName("finish_reason")
     val finishReason: String? = null
@@ -123,11 +109,94 @@ data class ChoiceDto(
 @Serializable
 data class UsageDto(
     @SerialName("prompt_tokens")
-    val promptTokens: Int,
+    val promptTokens: Int = 0,
     @SerialName("completion_tokens")
-    val completionTokens: Int,
+    val completionTokens: Int = 0,
     @SerialName("total_tokens")
-    val totalTokens: Int
+    val totalTokens: Int = 0
+)
+
+// ==================== OpenAI SSE Stream Chunk ====================
+
+@Serializable
+data class OpenAIStreamChunk(
+    val id: String? = null,
+    val choices: List<OpenAIStreamChoice> = emptyList()
+)
+
+@Serializable
+data class OpenAIStreamChoice(
+    val index: Int = 0,
+    val delta: OpenAIDelta? = null,
+    @SerialName("finish_reason")
+    val finishReason: String? = null
+)
+
+@Serializable
+data class OpenAIDelta(
+    val role: String? = null,
+    val content: String? = null
+)
+
+// ==================== Anthropic Claude API Models ====================
+
+@Serializable
+data class AnthropicRequest(
+    val model: String,
+    val messages: List<AnthropicMessage>,
+    @SerialName("max_tokens")
+    val maxTokens: Int = 4096,
+    val temperature: Float? = null,
+    @SerialName("top_p")
+    val topP: Float? = null,
+    val system: String? = null,
+    val stream: Boolean = false
+)
+
+/** Anthropic 消息 — content 为字符串（最简单也最兼容） */
+@Serializable
+data class AnthropicMessage(
+    val role: String,
+    val content: String
+)
+
+@Serializable
+data class AnthropicResponse(
+    val id: String? = null,
+    val type: String = "message",
+    val role: String = "assistant",
+    val content: List<AnthropicContentBlock> = emptyList(),
+    val model: String? = null,
+    @SerialName("stop_reason")
+    val stopReason: String? = null,
+    val usage: AnthropicUsage? = null
+)
+
+@Serializable
+data class AnthropicContentBlock(
+    val type: String = "text",
+    val text: String? = null
+)
+
+@Serializable
+data class AnthropicUsage(
+    @SerialName("input_tokens")
+    val inputTokens: Int = 0,
+    @SerialName("output_tokens")
+    val outputTokens: Int = 0
+)
+
+// Anthropic SSE events
+@Serializable
+data class AnthropicStreamEvent(
+    val type: String,
+    val delta: AnthropicDelta? = null
+)
+
+@Serializable
+data class AnthropicDelta(
+    val type: String? = null,
+    val text: String? = null
 )
 
 // ==================== Gemini API Models ====================
@@ -135,12 +204,15 @@ data class UsageDto(
 @Serializable
 data class GeminiRequest(
     val contents: List<ContentDto>,
-    val generationConfig: GenerationConfigDto? = null
+    val generationConfig: GenerationConfigDto? = null,
+    @SerialName("system_instruction")
+    val systemInstruction: ContentDto? = null
 )
 
 @Serializable
 data class ContentDto(
-    val parts: List<PartDto>
+    val parts: List<PartDto>,
+    val role: String? = null
 )
 
 @Serializable
@@ -150,13 +222,10 @@ data class PartDto(
     val inlineData: InlineDataDto? = null
 )
 
-/**
- * Gemini内联数据（用于图片等多模态内容）
- */
 @Serializable
 data class InlineDataDto(
     val mimeType: String,
-    val data: String  // Base64编码
+    val data: String
 )
 
 @Serializable
@@ -172,7 +241,19 @@ data class GenerationConfigDto(
 data class GeminiResponse(
     val candidates: List<CandidateDto>? = null,
     @SerialName("promptFeedback")
-    val promptFeedback: PromptFeedbackDto? = null
+    val promptFeedback: PromptFeedbackDto? = null,
+    @SerialName("usageMetadata")
+    val usageMetadata: GeminiUsageMetadata? = null
+)
+
+@Serializable
+data class GeminiUsageMetadata(
+    @SerialName("promptTokenCount")
+    val promptTokenCount: Int = 0,
+    @SerialName("candidatesTokenCount")
+    val candidatesTokenCount: Int = 0,
+    @SerialName("totalTokenCount")
+    val totalTokenCount: Int = 0
 )
 
 @Serializable
@@ -211,9 +292,10 @@ data class MiniMaxChatRequest(
 @Serializable
 data class MiniMaxChatResponse(
     val id: String? = null,
-    val choices: List<MiniMaxChoiceDto>,
+    val choices: List<MiniMaxChoiceDto> = emptyList(),
     val usage: UsageDto? = null,
     val model: String? = null,
+    @SerialName("object")
     val objectStr: String? = null,
     val created: Long? = null
 )
@@ -222,7 +304,7 @@ data class MiniMaxChatResponse(
 data class MiniMaxChoiceDto(
     val index: Int = 0,
     val messages: List<MessageDto>? = null,
-    val message: MessageDto? = null,  // 支持OpenAI格式
+    val message: MessageDto? = null,
     @SerialName("finish_reason")
     val finishReason: String? = null
 )

@@ -3,16 +3,23 @@
     <base-config cleartextTrafficPermitted="true">
         <trust-anchors>
             <certificates src="system" />
-            <certificates src="user" />
         </trust-anchors>
     </base-config>
-    
-    <!-- 允许明文通信到所有API端点 -->
     <domain-config cleartextTrafficPermitted="true">
         <domain includeSubdomains="true">api.deepseek.com</domain>
         <domain includeSubdomains="true">api.minimax.chat</domain>
         <domain includeSubdomains="true">api.minimaxi.com</domain>
         <domain includeSubdomains="true">api.openai.com</domain>
         <domain includeSubdomains="true">generativelanguage.googleapis.com</domain>
+        <domain includeSubdomains="true">api.anthropic.com</domain>
+        <domain includeSubdomains="true">dashscope.aliyuncs.com</domain>
+        <domain includeSubdomains="true">open.bigmodel.cn</domain>
+        <domain includeSubdomains="true">api.moonshot.cn</domain>
+        <domain includeSubdomains="true">api.lingyiwanwu.com</domain>
+        <domain includeSubdomains="true">api.baichuan-ai.com</domain>
+        <domain includeSubdomains="true">ark.cn-beijing.volces.com</domain>
+        <domain includeSubdomains="true">api.minimaxi.com</domain>
+        <domain includeSubdomains="true">localhost</domain>
+        <domain includeSubdomains="true">127.0.0.1</domain>
     </domain-config>
 </network-security-config>

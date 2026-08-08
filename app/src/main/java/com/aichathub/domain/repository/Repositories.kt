@@ -4,12 +4,11 @@ import com.aichathub.domain.model.*
 import kotlinx.coroutines.flow.Flow
 
 /**
- * AI服务仓库接口
+ * AI 服务仓库接口
  */
 interface AIServiceRepository {
     /**
-     * 发送消息并获取AI响应
-     * @param messages 消息列表，包含可能的附件
+     * 发送消息并获取 AI 响应（非流式）
      */
     suspend fun sendMessage(
         platform: AIPlatform,
@@ -18,62 +17,50 @@ interface AIServiceRepository {
         endpoint: String,
         messages: List<ChatMessage>,
         temperature: Float,
-        maxTokens: Int
+        maxTokens: Int,
+        systemPrompt: String = "",
+        customProvider: CustomProvider? = null
     ): Result<SendMessageResponse>
 
     /**
-     * 测试API连接
+     * 流式发送消息，逐 token 返回内容
+     * @return Flow<String> 每个 emit 是一段新增的文本
+     */
+    fun sendMessageStream(
+        platform: AIPlatform,
+        apiKey: String,
+        model: String,
+        endpoint: String,
+        messages: List<ChatMessage>,
+        temperature: Float,
+        maxTokens: Int,
+        systemPrompt: String = "",
+        customProvider: CustomProvider? = null
+    ): Flow<String>
+
+    /**
+     * 测试 API 连接
      */
     suspend fun testConnection(
         platform: AIPlatform,
         apiKey: String,
         endpoint: String,
-        model: String
+        model: String,
+        customProvider: CustomProvider? = null
     ): Result<Boolean>
 }
 
 /**
- * API密钥仓库接口
+ * API 密钥仓库接口
  */
 interface APIKeyRepository {
-    /**
-     * 获取所有API密钥
-     */
     fun getAllAPIKeys(): Flow<List<APIKeyInfo>>
-
-    /**
-     * 获取指定平台的API密钥
-     */
     fun getAPIKeysByPlatform(platform: AIPlatform): Flow<List<APIKeyInfo>>
-
-    /**
-     * 获取活跃的API密钥
-     */
     fun getActiveAPIKey(): Flow<APIKeyInfo?>
-
-    /**
-     * 添加新的API密钥
-     */
     suspend fun addAPIKey(info: APIKeyInfo)
-
-    /**
-     * 更新API密钥
-     */
     suspend fun updateAPIKey(info: APIKeyInfo)
-
-    /**
-     * 删除API密钥
-     */
     suspend fun deleteAPIKey(id: String)
-
-    /**
-     * 设置活跃的API密钥
-     */
     suspend fun setActiveAPIKey(id: String)
-
-    /**
-     * 获取加密的API密钥内容
-     */
     suspend fun getDecryptedAPIKey(id: String): String?
 }
 
@@ -81,39 +68,14 @@ interface APIKeyRepository {
  * 对话会话仓库接口
  */
 interface ChatSessionRepository {
-    /**
-     * 获取所有会话
-     */
     fun getAllSessions(): Flow<List<ChatSession>>
-
-    /**
-     * 获取指定会话
-     */
     suspend fun getSession(id: String): ChatSession?
-
-    /**
-     * 创建新会话
-     */
     suspend fun createSession(session: ChatSession): String
-
-    /**
-     * 更新会话
-     */
     suspend fun updateSession(session: ChatSession)
-
-    /**
-     * 删除会话
-     */
     suspend fun deleteSession(id: String)
-
-    /**
-     * 添加消息到会话
-     */
     suspend fun addMessageToSession(sessionId: String, message: ChatMessage)
-
-    /**
-     * 清空所有会话
-     */
+    suspend fun updateMessage(sessionId: String, message: ChatMessage)
+    suspend fun deleteMessage(sessionId: String, messageId: String)
     suspend fun clearAllSessions()
 }
 
@@ -121,23 +83,45 @@ interface ChatSessionRepository {
  * 应用设置仓库接口
  */
 interface SettingsRepository {
-    /**
-     * 获取应用设置
-     */
     fun getSettings(): Flow<AppSettings>
-
-    /**
-     * 更新应用设置
-     */
     suspend fun updateSettings(settings: AppSettings)
-
-    /**
-     * 切换暗色模式
-     */
     suspend fun toggleDarkMode()
-
-    /**
-     * 设置默认平台
-     */
     suspend fun setDefaultPlatform(platform: AIPlatform)
+}
+
+/**
+ * 自定义平台仓库接口
+ */
+interface CustomProviderRepository {
+    fun getAllProviders(): Flow<List<CustomProvider>>
+    suspend fun getProvider(id: String): CustomProvider?
+    suspend fun addProvider(provider: CustomProvider): String
+    suspend fun updateProvider(provider: CustomProvider)
+    suspend fun deleteProvider(id: String)
+}
+
+/**
+ * 工作目录仓库接口
+ */
+interface WorkspaceRepository {
+    fun getSettings(): Flow<WorkspaceSettings>
+    suspend fun updateSettings(settings: WorkspaceSettings)
+    /** 列出工作目录中的文件 */
+    suspend fun listFiles(): List<WorkspaceFile>
+    /** 从工作目录读取文件为字节数组 */
+    suspend fun readFile(fileName: String): ByteArray?
+    /** 写入文件到工作目录 */
+    suspend fun writeFile(fileName: String, content: ByteArray): Boolean
+    /** 删除文件 */
+    suspend fun deleteFile(fileName: String): Boolean
+}
+
+/**
+ * 终端日志仓库接口
+ */
+interface TerminalLogRepository {
+    fun getLogs(): Flow<List<TerminalLog>>
+    suspend fun addLog(log: TerminalLog)
+    suspend fun addLogs(logs: List<TerminalLog>)
+    suspend fun clearLogs()
 }

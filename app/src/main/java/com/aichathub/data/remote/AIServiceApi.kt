@@ -1,18 +1,31 @@
 package com.aichathub.data.remote
 
-import com.aichathub.data.model.*
+import com.aichathub.data.model.AnthropicRequest
+import com.aichathub.data.model.AnthropicResponse
+import com.aichathub.data.model.GeminiRequest
+import com.aichathub.data.model.GeminiResponse
+import com.aichathub.data.model.MiniMaxChatRequest
+import com.aichathub.data.model.MiniMaxChatResponse
+import com.aichathub.data.model.SimpleChatRequest
+import com.aichathub.data.model.OpenAIChatResponse
 import retrofit2.Response
-import retrofit2.http.*
+import retrofit2.http.Body
+import retrofit2.http.Header
+import retrofit2.http.HeaderMap
+import retrofit2.http.POST
+import retrofit2.http.Query
+import retrofit2.http.Url
 
 /**
- * 统一AI服务API接口
+ * AI 服务 API 接口
+ * 所有方法均使用 @Url 接收完整地址，便于支持自定义端点
  */
 interface AIServiceApi {
 
-    /**
-     * OpenAI/DeepSeek 格式的聊天请求
-     * 使用SimpleChatRequest来处理纯文本消息
-     */
+    // ============ OpenAI 兼容端点 ============
+    // DeepSeek/Qwen/Zhipu/Moonshot/Yi/Baichuan/Doubao/Hunyuan/Spark/SiliconFlow/Groq/Together/OpenRouter/Custom
+
+    /** 标准鉴权（Authorization: Bearer xxx）的 OpenAI 兼容调用 */
     @POST
     suspend fun chatCompletion(
         @Url url: String,
@@ -20,9 +33,26 @@ interface AIServiceApi {
         @Body request: SimpleChatRequest
     ): Response<OpenAIChatResponse>
 
-    /**
-     * Gemini API 请求
-     */
+    /** 自定义 Header 的 OpenAI 兼容调用（用于非标准鉴权头，例如自定义平台） */
+    @POST
+    suspend fun chatCompletionWithHeaders(
+        @Url url: String,
+        @HeaderMap headers: Map<String, String>,
+        @Body request: SimpleChatRequest
+    ): Response<OpenAIChatResponse>
+
+    // ============ Anthropic Claude ============
+
+    @POST
+    suspend fun anthropicMessages(
+        @Url url: String,
+        @Header("x-api-key") apiKey: String,
+        @Header("anthropic-version") version: String = "2023-06-01",
+        @Body request: AnthropicRequest
+    ): Response<AnthropicResponse>
+
+    // ============ Gemini ============
+
     @POST
     suspend fun geminiGenerateContent(
         @Url url: String,
@@ -30,9 +60,8 @@ interface AIServiceApi {
         @Body request: GeminiRequest
     ): Response<GeminiResponse>
 
-    /**
-     * MiniMax API 请求
-     */
+    // ============ MiniMax ============
+
     @POST
     suspend fun miniMaxChat(
         @Url url: String,
@@ -40,10 +69,6 @@ interface AIServiceApi {
         @Body request: MiniMaxChatRequest
     ): Response<MiniMaxChatResponse>
 
-    /**
-     * MiniMax VLM (Vision Language Model) 请求
-     * 用于处理图片等多模态输入
-     */
     @POST
     suspend fun miniMaxVLM(
         @Url url: String,
@@ -52,52 +77,42 @@ interface AIServiceApi {
     ): Response<MiniMaxVLMResponse>
 }
 
-/**
- * MiniMax VLM 请求模型
- */
+// ============ MiniMax VLM 内联 DTO ============
+
 @kotlinx.serialization.Serializable
 data class MiniMaxVLMRequest(
+    val model: String = "mmcl-vlm",
     val prompt: String,
     @kotlinx.serialization.SerialName("image_url")
     val imageUrl: String
 )
 
-/**
- * MiniMax VLM 响应模型
- */
 @kotlinx.serialization.Serializable
 data class MiniMaxVLMResponse(
     val id: String? = null,
-    val choices: List<MiniMaxVLMChoice>? = null,
-    val created: Long? = null,
-    val base_resp: MiniMaxBaseResp? = null
+    @kotlinx.serialization.SerialName("base_resp")
+    val baseResp: MiniMaxBaseResp? = null,
+    val choices: List<MiniMaxVLMChoice> = emptyList()
 )
 
 @kotlinx.serialization.Serializable
 data class MiniMaxBaseResp(
-    val status_code: Int = 0,
-    val status_msg: String = ""
+    @kotlinx.serialization.SerialName("status_code")
+    val statusCode: Int = 0,
+    @kotlinx.serialization.SerialName("status_msg")
+    val statusMsg: String? = null
 )
 
 @kotlinx.serialization.Serializable
 data class MiniMaxVLMChoice(
-    val index: Int = 0,
-    val message: MiniMaxVLMMessage? = null,
     @kotlinx.serialization.SerialName("finish_reason")
-    val finishReason: String? = null
+    val finishReason: String? = null,
+    val index: Int = 0,
+    val message: MiniMaxVLMMessage? = null
 )
 
 @kotlinx.serialization.Serializable
 data class MiniMaxVLMMessage(
-    val role: String = "assistant",
-    val content: String = ""
+    val content: String? = null,
+    val role: String = "assistant"
 )
-
-/**
- * API响应包装类
- */
-sealed class ApiResult<out T> {
-    data class Success<T>(val data: T) : ApiResult<T>()
-    data class Error(val code: Int, val message: String) : ApiResult<Nothing>()
-    data class NetworkError(val exception: Throwable) : ApiResult<Nothing>()
-}

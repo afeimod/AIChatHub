@@ -1,11 +1,10 @@
 package com.aichathub.ui.components
 
-import android.net.Uri
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -15,476 +14,290 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
-import com.aichathub.domain.model.AttachmentType
+import com.aichathub.domain.model.AIPlatform
 import com.aichathub.domain.model.MessageAttachment
-import com.aichathub.ui.theme.PrimaryBlue
-import com.aichathub.ui.theme.TextSecondary
 
 /**
- * 带文件附件功能的输入组件
+ * 消息输入框（带附件 + 停止按钮）
  */
 @Composable
 fun MessageInputWithAttachment(
     text: String,
     onTextChange: (String) -> Unit,
-    onSend: () -> Unit,
-    onAttachFile: () -> Unit,
-    enabled: Boolean = true,
-    attachments: List<MessageAttachment> = emptyList(),
-    onRemoveAttachment: (MessageAttachment) -> Unit = {},
+    onSendClick: () -> Unit,
+    onAttachClick: () -> Unit,
+    isSending: Boolean,
+    isStreaming: Boolean,
+    activeAPIKey: com.aichathub.domain.model.APIKeyInfo?,
+    pendingAttachments: List<MessageAttachment>,
+    onRemoveAttachment: (String) -> Unit,
+    onStopClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     Surface(
-        modifier = modifier.fillMaxWidth(),
-        tonalElevation = 4.dp,
-        shadowElevation = 8.dp
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 2.dp,
+        modifier = modifier.fillMaxWidth()
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp)
-        ) {
-            // 显示图片附件预览（如果是图片）
-            val imageAttachments = attachments.filter { it.type == AttachmentType.IMAGE }
-            if (imageAttachments.isNotEmpty()) {
-                Row(
+        Column {
+            // 附件预览
+            if (pendingAttachments.isNotEmpty()) {
+                LazyRow(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    imageAttachments.forEach { attachment ->
-                        // 显示图片缩略图预览
-                        Box(
-                            modifier = Modifier
-                                .size(80.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(MaterialTheme.colorScheme.surfaceVariant)
-                        ) {
-                            // 构建图片数据模型 - 优先使用base64Data
-                            val imageModel = if (!attachment.base64Data.isNullOrBlank()) {
-                                val mimeType = attachment.mimeType.ifBlank { "image/jpeg" }
-                                "data:$mimeType;base64,${attachment.base64Data}"
-                            } else if (!attachment.localPath.isNullOrBlank()) {
-                                attachment.localPath
-                            } else {
-                                ""
-                            }
-                            
-                            // 只有非空字符串才传给AsyncImage
-                            if (imageModel.isNotBlank()) {
-                                AsyncImage(
-                                    model = imageModel,
-                                    contentDescription = attachment.fileName,
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentScale = ContentScale.Crop,
-                                    onError = { /* 预览加载失败不显示错误，保持空白 */ },
-                                    onSuccess = { /* 预览加载成功 */ }
-                                )
-                            }
-                            
-                            // 移除按钮
-                            IconButton(
-                                onClick = { onRemoveAttachment(attachment) },
-                                modifier = Modifier
-                                    .align(Alignment.TopEnd)
-                                    .size(24.dp)
-                                    .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Close,
-                                    contentDescription = "移除",
-                                    modifier = Modifier.size(14.dp),
-                                    tint = Color.White
-                                )
-                            }
-                        }
+                    items(pendingAttachments) { att ->
+                        PendingAttachmentChip(att) { onRemoveAttachment(att.id) }
                     }
                 }
             }
 
-            // 显示其他附件（非图片）
-            val otherAttachments = attachments.filter { it.type != AttachmentType.IMAGE }
-            if (otherAttachments.isNotEmpty()) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    otherAttachments.forEach { attachment ->
-                        AttachmentChip(
-                            attachment = attachment,
-                            onRemove = { onRemoveAttachment(attachment) }
-                        )
-                    }
-                }
-            }
-
-            // 主输入行
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(8.dp),
+                verticalAlignment = Alignment.Bottom
             ) {
-                // 附件按钮 - 更改为加号图标，更醒目
                 FilledIconButton(
-                    onClick = onAttachFile,
-                    enabled = enabled,
-                    colors = IconButtonDefaults.filledIconButtonColors(
-                        containerColor = PrimaryBlue.copy(alpha = 0.1f),
-                        contentColor = PrimaryBlue
-                    )
+                    onClick = onAttachClick,
+                    modifier = Modifier.size(44.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Add,
-                        contentDescription = "添加附件",
-                        modifier = Modifier.size(24.dp)
-                    )
+                    Icon(Icons.Filled.AttachFile, contentDescription = "附件")
                 }
+                Spacer(modifier = Modifier.width(8.dp))
 
                 OutlinedTextField(
                     value = text,
                     onValueChange = onTextChange,
                     modifier = Modifier.weight(1f),
-                    placeholder = {
-                        Text(
-                            text = if (attachments.isNotEmpty()) "添加消息描述..." else "输入您的消息...",
-                            color = TextSecondary
-                        )
-                    },
-                    enabled = enabled,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = PrimaryBlue,
-                        unfocusedBorderColor = Color.LightGray,
-                        disabledBorderColor = Color.LightGray.copy(alpha = 0.5f)
-                    ),
-                    shape = RoundedCornerShape(24.dp),
-                    keyboardOptions = KeyboardOptions(
-                        capitalization = KeyboardCapitalization.Sentences,
-                        imeAction = ImeAction.Send
-                    ),
-                    keyboardActions = KeyboardActions(
-                        onSend = { if (text.isNotBlank() || attachments.isNotEmpty()) onSend() }
-                    ),
-                    singleLine = false,
-                    maxLines = 4
+                    placeholder = { Text("输入消息…") },
+                    maxLines = 4,
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+                    shape = RoundedCornerShape(22.dp)
                 )
-
                 Spacer(modifier = Modifier.width(8.dp))
 
-                IconButton(
-                    onClick = onSend,
-                    enabled = enabled && (text.isNotBlank() || attachments.isNotEmpty()),
-                    colors = IconButtonDefaults.iconButtonColors(
-                        containerColor = PrimaryBlue,
-                        contentColor = Color.White,
-                        disabledContainerColor = Color.LightGray,
-                        disabledContentColor = Color.White.copy(alpha = 0.5f)
-                    )
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.Send,
-                        contentDescription = "发送"
-                    )
+                if (isStreaming) {
+                    FilledIconButton(
+                        onClick = onStopClick,
+                        modifier = Modifier.size(44.dp)
+                    ) {
+                        Icon(Icons.Filled.Stop, contentDescription = "停止", tint = MaterialTheme.colorScheme.error)
+                    }
+                } else {
+                    FilledIconButton(
+                        onClick = onSendClick,
+                        enabled = (text.isNotBlank() || pendingAttachments.isNotEmpty()) && activeAPIKey != null && !isSending,
+                        modifier = Modifier.size(44.dp)
+                    ) {
+                        Icon(Icons.Filled.Send, contentDescription = "发送")
+                    }
                 }
             }
         }
     }
 }
 
-/**
- * 附件展示组件
- */
 @Composable
-fun AttachmentChip(
-    attachment: MessageAttachment,
-    onRemove: () -> Unit
-) {
+fun PendingAttachmentChip(att: MessageAttachment, onRemove: () -> Unit) {
+    val icon: ImageVector = when (att.type) {
+        com.aichathub.domain.model.AttachmentType.IMAGE -> Icons.Filled.Image
+        com.aichathub.domain.model.AttachmentType.PDF -> Icons.Filled.PictureAsPdf
+        com.aichathub.domain.model.AttachmentType.DOCUMENT -> Icons.Filled.Description
+        com.aichathub.domain.model.AttachmentType.ARCHIVE -> Icons.Filled.FolderZip
+        com.aichathub.domain.model.AttachmentType.AUDIO -> Icons.Filled.AudioFile
+        com.aichathub.domain.model.AttachmentType.VIDEO -> Icons.Filled.VideoFile
+        else -> Icons.Filled.InsertDriveFile
+    }
     Surface(
-        shape = RoundedCornerShape(8.dp),
-        color = MaterialTheme.colorScheme.secondaryContainer
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
         ) {
-            Icon(
-                imageVector = when (attachment.type) {
-                    AttachmentType.IMAGE -> Icons.Default.Image
-                    AttachmentType.PDF -> Icons.Default.PictureAsPdf
-                    AttachmentType.DOCUMENT -> Icons.Default.Description
-                    AttachmentType.ARCHIVE -> Icons.Default.Archive
-                    AttachmentType.OTHER -> Icons.Default.InsertDriveFile
-                },
-                contentDescription = null,
-                modifier = Modifier.size(16.dp),
-                tint = MaterialTheme.colorScheme.onSecondaryContainer
-            )
-
+            if (att.type == com.aichathub.domain.model.AttachmentType.IMAGE && att.base64Data != null) {
+                AsyncImage(
+                    model = "data:${att.mimeType};base64,${att.base64Data}",
+                    contentDescription = att.fileName,
+                    modifier = Modifier.size(28.dp).clip(RoundedCornerShape(4.dp))
+                )
+            } else {
+                Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+            }
             Text(
-                text = attachment.fileName,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSecondaryContainer,
-                maxLines = 1
+                text = att.fileName,
+                fontSize = 11.sp,
+                modifier = Modifier.padding(start = 4.dp, end = 4.dp),
+                color = MaterialTheme.colorScheme.onSurface
             )
-
-            IconButton(
-                onClick = onRemove,
-                modifier = Modifier.size(20.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Close,
-                    contentDescription = "移除",
-                    modifier = Modifier.size(14.dp),
-                    tint = MaterialTheme.colorScheme.onSecondaryContainer
-                )
+            IconButton(onClick = onRemove, modifier = Modifier.size(16.dp)) {
+                Icon(Icons.Filled.Close, contentDescription = "移除", modifier = Modifier.size(12.dp))
             }
         }
     }
 }
 
-/**
- * 图片附件预览
- */
-@Composable
-fun AttachmentImagePreview(
-    attachment: MessageAttachment,
-    onRemove: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Box(
-        modifier = modifier
-            .size(120.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .clickable { /* 查看大图 */ }
-    ) {
-        val imageModel = if (!attachment.base64Data.isNullOrBlank()) {
-            "data:${attachment.mimeType};base64,${attachment.base64Data}"
-        } else {
-            attachment.localPath ?: ""
-        }
-        AsyncImage(
-            model = imageModel,
-            contentDescription = attachment.fileName,
-            modifier = Modifier.fillMaxSize(),
-            contentScale = ContentScale.Crop
-        )
-
-        // 移除按钮
-        IconButton(
-            onClick = onRemove,
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .size(24.dp)
-                .padding(4.dp)
-        ) {
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = Color.Black.copy(alpha = 0.5f)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Close,
-                    contentDescription = "移除",
-                    modifier = Modifier
-                        .size(16.dp)
-                        .padding(2.dp),
-                    tint = Color.White
-                )
-            }
-        }
-    }
-}
-
-/**
- * 文件类型选择器
- */
 @Composable
 fun AttachmentTypeDialog(
     onDismiss: () -> Unit,
-    onSelectImage: () -> Unit,
-    onSelectDocument: () -> Unit,
-    onSelectCamera: () -> Unit,
-    onSelectArchive: () -> Unit = {}
+    onImageSelected: () -> Unit,
+    onDocumentSelected: () -> Unit,
+    onArchiveSelected: () -> Unit,
+    onCameraSelected: () -> Unit = {}
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("选择文件类型") },
+        title = { Text("选择附件类型") },
         text = {
-            Column(
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                ListItem(
-                    headlineContent = { Text("图片") },
-                    leadingContent = {
-                        Icon(Icons.Default.Image, contentDescription = null)
-                    },
-                    modifier = Modifier.clickable {
-                        onSelectImage()
-                        onDismiss()
-                    }
-                )
-                ListItem(
-                    headlineContent = { Text("文档") },
-                    leadingContent = {
-                        Icon(Icons.Default.Description, contentDescription = null)
-                    },
-                    modifier = Modifier.clickable {
-                        onSelectDocument()
-                        onDismiss()
-                    }
-                )
-                ListItem(
-                    headlineContent = { Text("压缩包 (ZIP/RAR)") },
-                    leadingContent = {
-                        Icon(Icons.Default.Archive, contentDescription = null)
-                    },
-                    modifier = Modifier.clickable {
-                        onSelectArchive()
-                        onDismiss()
-                    }
-                )
-                ListItem(
-                    headlineContent = { Text("拍照") },
-                    leadingContent = {
-                        Icon(Icons.Default.CameraAlt, contentDescription = null)
-                    },
-                    modifier = Modifier.clickable {
-                        onSelectCamera()
-                        onDismiss()
-                    }
-                )
+            Column {
+                DialogItem(Icons.Filled.Image, "图片") { onImageSelected() }
+                DialogItem(Icons.Filled.Description, "文档 (PDF/TXT/Word)") { onDocumentSelected() }
+                DialogItem(Icons.Filled.FolderZip, "压缩包 (ZIP/RAR/7z)") { onArchiveSelected() }
+                DialogItem(Icons.Filled.PhotoCamera, "拍照") { onCameraSelected() }
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text("取消")
-            }
+            TextButton(onClick = onDismiss) { Text("取消") }
         }
     )
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DialogItem(icon: ImageVector, label: String, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .padding(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+        Text(label, modifier = Modifier.padding(start = 12.dp), color = MaterialTheme.colorScheme.onSurface)
+    }
+}
+
 @Composable
 fun PlatformSelector(
-    selectedPlatform: com.aichathub.domain.model.AIPlatform,
-    onPlatformChange: (com.aichathub.domain.model.AIPlatform) -> Unit,
+    selected: AIPlatform,
+    onSelect: (AIPlatform) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var expanded by remember { mutableStateOf(false) }
-
-    ExposedDropdownMenuBox(
-        expanded = expanded,
-        onExpandedChange = { expanded = it },
-        modifier = modifier
-    ) {
+    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }, modifier = modifier) {
         OutlinedTextField(
-            value = selectedPlatform.displayName,
+            value = selected.displayName,
             onValueChange = {},
             readOnly = true,
-            label = { Text("选择平台") },
-            leadingIcon = {
-                Icon(
-                    imageVector = getPlatformIcon(selectedPlatform),
-                    contentDescription = null
-                )
-            },
-            trailingIcon = {
-                ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
-            },
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = PrimaryBlue
-            ),
-            modifier = Modifier
-                .menuAnchor()
-                .fillMaxWidth()
+            label = { Text("平台") },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            leadingIcon = { Icon(getPlatformIcon(selected), contentDescription = null) },
+            modifier = Modifier.menuAnchor().fillMaxWidth()
         )
-
-        ExposedDropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false }
-        ) {
-            com.aichathub.domain.model.AIPlatform.entries.forEach { platform ->
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            AIPlatform.builtIn.forEach { p ->
                 DropdownMenuItem(
-                    text = {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = getPlatformIcon(platform),
-                                contentDescription = null,
-                                modifier = Modifier.size(24.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(platform.displayName)
-                        }
-                    },
-                    onClick = {
-                        onPlatformChange(platform)
-                        expanded = false
-                    }
+                    text = { Text(p.displayName) },
+                    onClick = { onSelect(p); expanded = false },
+                    leadingIcon = { Icon(getPlatformIcon(p), contentDescription = null) }
                 )
             }
         }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ModelSelector(
-    selectedModel: String,
-    availableModels: List<String>,
-    onModelChange: (String) -> Unit,
-    modifier: Modifier = Modifier
+    selected: String,
+    models: List<String>,
+    onSelect: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    customInputEnabled: Boolean = true
 ) {
     var expanded by remember { mutableStateOf(false) }
+    var useCustom by remember { mutableStateOf(false) }
+    var customModel by remember { mutableStateOf(selected) }
 
-    ExposedDropdownMenuBox(
-        expanded = expanded,
-        onExpandedChange = { expanded = it },
-        modifier = modifier
-    ) {
+    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }, modifier = modifier) {
         OutlinedTextField(
-            value = selectedModel,
+            value = selected,
             onValueChange = {},
             readOnly = true,
-            label = { Text("选择模型") },
-            trailingIcon = {
-                ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
-            },
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = PrimaryBlue
-            ),
-            modifier = Modifier
-                .menuAnchor()
-                .fillMaxWidth()
+            label = { Text("模型") },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier.menuAnchor().fillMaxWidth()
         )
-
-        ExposedDropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false }
-        ) {
-            availableModels.forEach { model ->
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            models.forEach { m ->
                 DropdownMenuItem(
-                    text = { Text(model) },
-                    onClick = {
-                        onModelChange(model)
-                        expanded = false
-                    }
+                    text = { Text(m) },
+                    onClick = { onSelect(m); expanded = false }
+                )
+            }
+            if (customInputEnabled) {
+                HorizontalDivider()
+                DropdownMenuItem(
+                    text = { Text("✎ 自定义模型名…") },
+                    onClick = { useCustom = true; expanded = false }
                 )
             }
         }
     }
+
+    if (useCustom) {
+        AlertDialog(
+            onDismissRequest = { useCustom = false },
+            title = { Text("自定义模型名") },
+            text = {
+                OutlinedTextField(
+                    value = customModel,
+                    onValueChange = { customModel = it },
+                    label = { Text("模型 ID") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (customModel.isNotBlank()) onSelect(customModel.trim())
+                    useCustom = false
+                }) { Text("确定") }
+            },
+            dismissButton = {
+                TextButton(onClick = { useCustom = false }) { Text("取消") }
+            }
+        )
+    }
 }
 
-@Composable
-fun getPlatformIcon(platform: com.aichathub.domain.model.AIPlatform) = when (platform) {
-    com.aichathub.domain.model.AIPlatform.DEEPSEEK -> Icons.Filled.Cloud
-    com.aichathub.domain.model.AIPlatform.MINIMAX -> Icons.Filled.PlayArrow
-    com.aichathub.domain.model.AIPlatform.OPENAI -> Icons.Filled.Psychology
-    com.aichathub.domain.model.AIPlatform.GEMINI -> Icons.Filled.AutoAwesome
+fun getPlatformIcon(platform: AIPlatform): ImageVector = when (platform) {
+    AIPlatform.DEEPSEEK -> Icons.Filled.Cloud
+    AIPlatform.OPENAI -> Icons.Filled.Psychology
+    AIPlatform.GEMINI -> Icons.Filled.AutoAwesome
+    AIPlatform.ANTHROPIC -> Icons.Filled.SmartToy
+    AIPlatform.MINIMAX -> Icons.Filled.PlayArrow
+    AIPlatform.QWEN -> Icons.Filled.Translate
+    AIPlatform.ZHIPU -> Icons.Filled.Lightbulb
+    AIPlatform.MOONSHOT -> Icons.Filled.Nightlight
+    AIPlatform.YI -> Icons.Filled.Language
+    AIPlatform.BAICHUAN -> Icons.Filled.Waves
+    AIPlatform.DOUBAO -> Icons.Filled.LocalFireDepartment
+    AIPlatform.HUNYUAN -> Icons.Filled.WaterDrop
+    AIPlatform.SPARK -> Icons.Filled.Bolt
+    AIPlatform.SILICONFLOW -> Icons.Filled.Memory
+    AIPlatform.GROQ -> Icons.Filled.Bolt
+    AIPlatform.TOGETHER -> Icons.Filled.GroupWork
+    AIPlatform.OPENROUTER -> Icons.Filled.Hub
+    AIPlatform.CUSTOM -> Icons.Filled.Extension
 }

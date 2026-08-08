@@ -5,13 +5,18 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.aichathub.data.local.TerminalLogManager
 import com.aichathub.domain.model.*
 import com.aichathub.domain.repository.APIKeyRepository
 import com.aichathub.domain.repository.ChatSessionRepository
+import com.aichathub.domain.repository.CustomProviderRepository
 import com.aichathub.domain.repository.SettingsRepository
 import com.aichathub.domain.usecase.*
+import com.aichathub.domain.util.ContextManager
+import com.aichathub.domain.util.TokenEstimator
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.util.Base64
@@ -25,30 +30,48 @@ data class ChatUiState(
     val selectedModel: String = AIPlatform.DEEPSEEK.defaultModel,
     val inputText: String = "",
     val isLoading: Boolean = false,
+    val isStreaming: Boolean = false,
     val isTyping: Boolean = false,
     val error: String? = null,
     val activeAPIKey: APIKeyInfo? = null,
     val settings: AppSettings = AppSettings(),
     val showAPIKeyDialog: Boolean = false,
-    val pendingAttachments: List<MessageAttachment> = emptyList()  // 待发送的附件
+    val pendingAttachments: List<MessageAttachment> = emptyList(),
+    val showSessionHistory: Boolean = false,
+    val showSystemPromptDialog: Boolean = false,
+    val systemPrompt: String = "",
+    val estimatedInputTokens: Int = 0,
+    val estimatedSessionTokens: Int = 0,
+    val showWorkspacePicker: Boolean = false,
+    val availableModels: List<String> = emptyList(),
+    val customProviders: List<CustomProvider> = emptyList()
 )
 
 @HiltViewModel
 class ChatViewModel @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val sendMessageUseCase: SendMessageUseCase,
+    private val sendMessageStreamUseCase: SendMessageStreamUseCase,
     private val createSessionUseCase: CreateSessionUseCase,
-    private val getAPIKeysUseCase: GetAPIKeysUseCase,
-    private val getSettingsUseCase: GetSettingsUseCase,
     private val deleteSessionUseCase: DeleteSessionUseCase,
     private val clearAllSessionsUseCase: ClearAllSessionsUseCase,
+    private val updateSessionUseCase: UpdateSessionUseCase,
+    private val deleteMessageUseCase: DeleteMessageUseCase,
+    private val updateMessageUseCase: UpdateMessageUseCase,
+    private val getAPIKeysUseCase: GetAPIKeysUseCase,
+    private val getSettingsUseCase: GetSettingsUseCase,
+    private val getCustomProvidersUseCase: GetCustomProvidersUseCase,
     private val chatSessionRepository: ChatSessionRepository,
     private val apiKeyRepository: APIKeyRepository,
     private val settingsRepository: SettingsRepository,
-    @ApplicationContext private val context: Context
+    private val customProviderRepository: CustomProviderRepository,
+    private val logManager: TerminalLogManager
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ChatUiState())
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
+
+    private var streamingJob: Job? = null
 
     init {
         loadInitialData()
@@ -56,181 +79,146 @@ class ChatViewModel @Inject constructor(
 
     private fun loadInitialData() {
         viewModelScope.launch {
-            // 加载设置（用于默认值）
+            // 设置
             getSettingsUseCase().collect { settings ->
+                _uiState.update { it.copy(settings = settings) }
+            }
+        }
+        viewModelScope.launch {
+            // 活跃 API Key
+            apiKeyRepository.getActiveAPIKey().collect { key ->
                 _uiState.update {
                     it.copy(
-                        settings = settings,
-                        // 仅当没有选择平台时使用设置中的默认值
-                        selectedPlatform = if (it.selectedPlatform == AIPlatform.DEEPSEEK) settings.defaultPlatform else it.selectedPlatform,
-                        selectedModel = if (it.selectedModel == AIPlatform.DEEPSEEK.defaultModel) settings.defaultPlatform.defaultModel else it.selectedModel
+                        activeAPIKey = key,
+                        availableModels = key?.availableModels() ?: it.selectedPlatform.models,
+                        selectedPlatform = key?.platform ?: it.selectedPlatform,
+                        selectedModel = key?.defaultModel() ?: it.selectedPlatform.defaultModel
                     )
                 }
             }
         }
-
         viewModelScope.launch {
-            // 加载活跃的API密钥
-            apiKeyRepository.getActiveAPIKey().collect { activeKey ->
-                if (activeKey != null) {
-                    _uiState.update {
-                        it.copy(
-                            activeAPIKey = activeKey,
-                            // 如果没有用户手动选择，使用API密钥对应的平台
-                            selectedPlatform = if (it.selectedPlatform == AIPlatform.DEEPSEEK && it.messages.isEmpty()) activeKey.platform else it.selectedPlatform,
-                            selectedModel = if (it.selectedModel == AIPlatform.DEEPSEEK.defaultModel && it.messages.isEmpty()) activeKey.platform.defaultModel else it.selectedModel
-                        )
-                    }
-                }
-            }
-        }
-
-        viewModelScope.launch {
-            // 加载所有会话
+            // 所有会话
             chatSessionRepository.getAllSessions().collect { sessions ->
-                _uiState.update { it.copy(allSessions = sessions) }
-                // 如果没有当前会话且有会话列表，选择第一个
-                if (_uiState.value.currentSession == null && sessions.isNotEmpty()) {
-                    val firstSession = sessions.first()
-                    _uiState.update {
-                        it.copy(
-                            currentSession = firstSession,
-                            messages = firstSession.messages,
-                            selectedPlatform = firstSession.platform,
-                            selectedModel = firstSession.model
-                        )
-                    }
+                val current = _uiState.value.currentSession
+                val newCurrent = if (current == null && sessions.isNotEmpty()) sessions.first() else current
+                _uiState.update {
+                    it.copy(
+                        allSessions = sessions,
+                        currentSession = newCurrent,
+                        messages = newCurrent?.messages ?: emptyList(),
+                        systemPrompt = newCurrent?.systemPrompt ?: it.systemPrompt,
+                        estimatedSessionTokens = newCurrent?.let { s -> TokenEstimator.estimateSession(s) } ?: 0
+                    )
                 }
             }
         }
+        viewModelScope.launch {
+            // 自定义平台
+            getCustomProvidersUseCase().collect { providers ->
+                _uiState.update { it.copy(customProviders = providers) }
+            }
+        }
     }
 
-    /**
-     * 添加附件到待发送列表
-     */
+    // ============ 输入与附件 ============
+
+    fun updateInputText(text: String) {
+        val tokens = TokenEstimator.estimateText(text)
+        _uiState.update { it.copy(inputText = text, estimatedInputTokens = tokens) }
+    }
+
     fun addAttachment(uri: Uri) {
-        try {
-            val contentResolver = context.contentResolver
-            val mimeType = contentResolver.getType(uri) ?: "application/octet-stream"
-            val fileName = getFileName(uri) ?: "file_${System.currentTimeMillis()}"
-            val fileSize = getFileSize(uri)
-
-            // 读取文件内容并转换为Base64
-            val base64Data = contentResolver.openInputStream(uri)?.use { inputStream ->
-                val bytes = inputStream.readBytes()
-                Base64.getEncoder().encodeToString(bytes)
-            }
-
-            val attachment = MessageAttachment(
-                fileName = fileName,
-                mimeType = mimeType,
-                size = fileSize,
-                type = determineAttachmentType(mimeType),
-                localPath = uri.toString(),
-                base64Data = base64Data,
-                url = null
-            )
-
-            _uiState.update {
-                it.copy(pendingAttachments = it.pendingAttachments + attachment)
-            }
-        } catch (e: Exception) {
-            _uiState.update {
-                it.copy(error = "添加附件失败: ${e.message}")
+        viewModelScope.launch {
+            try {
+                val mimeType = context.contentResolver.getType(uri) ?: "*/*"
+                val (displayName, size) = queryFileInfo(uri)
+                val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@launch
+                val base64 = Base64.getEncoder().encodeToString(bytes)
+                val attachment = MessageAttachment(
+                    fileName = displayName,
+                    mimeType = mimeType,
+                    size = size,
+                    type = MessageAttachment.fromMimeType(mimeType, displayName, size).type,
+                    base64Data = base64,
+                    localPath = uri.toString()
+                )
+                logManager.info("Chat", "附件已添加: $displayName ($mimeType, ${size}B)")
+                _uiState.update {
+                    it.copy(pendingAttachments = it.pendingAttachments + attachment)
+                }
+            } catch (e: Exception) {
+                logManager.error("Chat", "读取附件失败: ${e.message}")
+                _uiState.update { it.copy(error = "读取附件失败: ${e.message}") }
             }
         }
     }
 
-    /**
-     * 移除附件
-     */
-    fun removeAttachment(attachment: MessageAttachment) {
+    private fun queryFileInfo(uri: Uri): Pair<String, Long> {
+        var name = "attachment"
+        var size = 0L
+        context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            val nameIdx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            val sizeIdx = cursor.getColumnIndex(OpenableColumns.SIZE)
+            if (cursor.moveToFirst()) {
+                if (nameIdx >= 0) name = cursor.getString(nameIdx)
+                if (sizeIdx >= 0) size = cursor.getLong(sizeIdx)
+            }
+        }
+        return name to size
+    }
+
+    fun removeAttachment(id: String) {
         _uiState.update {
-            it.copy(pendingAttachments = it.pendingAttachments.filter { a -> a.id != attachment.id })
+            it.copy(pendingAttachments = it.pendingAttachments.filterNot { att -> att.id == id })
         }
     }
 
-    /**
-     * 清空所有待发送附件
-     */
     fun clearAttachments() {
         _uiState.update { it.copy(pendingAttachments = emptyList()) }
     }
 
-    private fun getFileName(uri: Uri): String? {
-        var result: String? = null
-        if (uri.scheme == "content") {
-            val cursor = context.contentResolver.query(uri, null, null, null, null)
-            cursor?.use {
-                if (it.moveToFirst()) {
-                    val nameIndex = it.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                    if (nameIndex >= 0) {
-                        result = it.getString(nameIndex)
-                    }
-                }
-            }
-        }
-        if (result == null) {
-            result = uri.path
-            val cut = result?.lastIndexOf('/')
-            if (cut != null && cut != -1) {
-                result = result?.substring(cut + 1)
-            }
-        }
-        return result
-    }
-
-    private fun getFileSize(uri: Uri): Long {
-        var size = 0L
-        if (uri.scheme == "content") {
-            val cursor = context.contentResolver.query(uri, null, null, null, null)
-            cursor?.use {
-                if (it.moveToFirst()) {
-                    val sizeIndex = it.getColumnIndex(OpenableColumns.SIZE)
-                    if (sizeIndex >= 0 && !it.isNull(sizeIndex)) {
-                        size = it.getLong(sizeIndex)
-                    }
-                }
-            }
-        }
-        return size
-    }
-
-    private fun determineAttachmentType(mimeType: String): AttachmentType {
-        return when {
-            mimeType.startsWith("image/") -> AttachmentType.IMAGE
-            mimeType == "application/pdf" -> AttachmentType.PDF
-            mimeType.contains("archive") || mimeType.contains("zip") || mimeType.contains("rar") || mimeType.contains("compressed") -> AttachmentType.ARCHIVE
-            mimeType.contains("document") || mimeType.contains("text") -> AttachmentType.DOCUMENT
-            else -> AttachmentType.OTHER
-        }
-    }
+    // ============ 会话管理 ============
 
     fun createNewSession() {
         viewModelScope.launch {
-            val session = ChatSession(
+            val title = if (_uiState.value.settings.autoTitleFromFirstMessage) "新对话" else "新对话"
+            val id = createSessionUseCase(
+                title = title,
                 platform = _uiState.value.selectedPlatform,
-                model = _uiState.value.selectedModel
+                model = _uiState.value.selectedModel,
+                systemPrompt = _uiState.value.systemPrompt
             )
-            val id = chatSessionRepository.createSession(session)
-            val newSession = session.copy(id = id)
-            _uiState.update {
-                it.copy(
-                    currentSession = newSession,
-                    messages = emptyList()
-                )
+            val session = chatSessionRepository.getSession(id)
+            if (session != null) {
+                _uiState.update {
+                    it.copy(
+                        currentSession = session,
+                        messages = session.messages,
+                        systemPrompt = session.systemPrompt,
+                        inputText = "",
+                        pendingAttachments = emptyList(),
+                        error = null
+                    )
+                }
             }
+            logManager.info("Chat", "创建新会话: $id")
         }
     }
 
     fun selectSession(session: ChatSession) {
-        _uiState.update {
-            it.copy(
-                currentSession = session,
-                messages = session.messages,
-                selectedPlatform = session.platform,
-                selectedModel = session.model
-            )
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    currentSession = session,
+                    messages = session.messages,
+                    systemPrompt = session.systemPrompt,
+                    selectedPlatform = session.platform,
+                    selectedModel = session.model,
+                    showSessionHistory = false,
+                    estimatedSessionTokens = TokenEstimator.estimateSession(session)
+                )
+            }
         }
     }
 
@@ -239,113 +227,41 @@ class ChatViewModel @Inject constructor(
             deleteSessionUseCase(sessionId)
             if (_uiState.value.currentSession?.id == sessionId) {
                 _uiState.update {
-                    it.copy(
-                        currentSession = null,
-                        messages = emptyList()
-                    )
+                    it.copy(currentSession = null, messages = emptyList(), systemPrompt = "")
                 }
             }
         }
     }
 
-    fun updateInputText(text: String) {
-        _uiState.update { it.copy(inputText = text) }
+    fun showSessionHistory(show: Boolean) {
+        _uiState.update { it.copy(showSessionHistory = show) }
     }
 
-    fun sendMessage() {
-        val text = _uiState.value.inputText.trim()
-        val attachments = _uiState.value.pendingAttachments
-
-        // 至少要有文本或附件才能发送
-        if (text.isBlank() && attachments.isEmpty()) return
-
-        val session = _uiState.value.currentSession
-        if (session == null) {
-            createNewSession()
-            viewModelScope.launch {
-                kotlinx.coroutines.delay(100)
-                sendMessageActual(text, attachments)
-            }
-            return
-        }
-
-        sendMessageActual(text, attachments)
+    fun showSystemPromptDialog(show: Boolean) {
+        _uiState.update { it.copy(showSystemPromptDialog = show) }
     }
 
-    private fun sendMessageActual(text: String, attachments: List<MessageAttachment>) {
+    fun updateSystemPrompt(prompt: String) {
+        _uiState.update { it.copy(systemPrompt = prompt) }
         viewModelScope.launch {
-            _uiState.update {
-                it.copy(
-                    inputText = "",
-                    isLoading = true,
-                    isTyping = true,
-                    error = null,
-                    pendingAttachments = emptyList() // 清空附件
-                )
+            _uiState.value.currentSession?.let { session ->
+                val updated = session.copy(systemPrompt = prompt, updatedAt = System.currentTimeMillis())
+                updateSessionUseCase(updated)
+                _uiState.update { it.copy(currentSession = updated) }
             }
-
-            // 创建用户消息（包含附件）
-            val userMessage = ChatMessage(
-                role = MessageRole.USER,
-                content = text,
-                platform = _uiState.value.selectedPlatform,
-                model = _uiState.value.selectedModel,
-                attachments = attachments
-            )
-
-            val updatedMessages = _uiState.value.messages + userMessage
-            _uiState.update { it.copy(messages = updatedMessages) }
-
-            val session = _uiState.value.currentSession ?: return@launch
-
-            val result = sendMessageUseCase(
-                sessionId = session.id,
-                userMessage = text,
-                platform = _uiState.value.selectedPlatform,
-                model = _uiState.value.selectedModel,
-                temperature = _uiState.value.settings.defaultTemperature,
-                maxTokens = _uiState.value.settings.defaultMaxTokens,
-                attachments = attachments
-            )
-
-            result.fold(
-                onSuccess = { response ->
-                    val assistantMessage = ChatMessage(
-                        role = MessageRole.ASSISTANT,
-                        content = response.content,
-                        platform = response.platform,
-                        model = response.model
-                    )
-                    _uiState.update {
-                        it.copy(
-                            messages = it.messages + assistantMessage,
-                            isLoading = false,
-                            isTyping = false
-                        )
-                    }
-                },
-                onFailure = { error ->
-                    _uiState.update {
-                        it.copy(
-                            isLoading = false,
-                            isTyping = false,
-                            error = error.message ?: "发送消息失败"
-                        )
-                    }
-                }
-            )
         }
     }
 
-    fun clearError() {
-        _uiState.update { it.copy(error = null) }
-    }
+    // ============ 平台与模型选择 ============
 
     fun selectPlatform(platform: AIPlatform) {
+        val model = _uiState.value.activeAPIKey?.defaultModel() ?: platform.defaultModel
+        val available = _uiState.value.activeAPIKey?.availableModels()?.ifEmpty { platform.models } ?: platform.models
         _uiState.update {
             it.copy(
                 selectedPlatform = platform,
-                selectedModel = platform.defaultModel
+                selectedModel = model,
+                availableModels = available
             )
         }
     }
@@ -354,7 +270,235 @@ class ChatViewModel @Inject constructor(
         _uiState.update { it.copy(selectedModel = model) }
     }
 
-    fun getAvailableModels(platform: AIPlatform): List<String> {
-        return platform.models.ifEmpty { listOf(platform.defaultModel) }
+    fun getAvailableModels(): List<String> {
+        return _uiState.value.availableModels.ifEmpty {
+            _uiState.value.selectedPlatform.models
+        }
+    }
+
+    // ============ 发送消息（含流式） ============
+
+    fun sendMessage() {
+        val state = _uiState.value
+        val text = state.inputText.trim()
+        val attachments = state.pendingAttachments
+        if (text.isBlank() && attachments.isEmpty()) return
+        if (state.isLoading || state.isStreaming) return
+
+        viewModelScope.launch {
+            val sessionId = state.currentSession?.id ?: run {
+                val id = createSessionUseCase(
+                    platform = state.selectedPlatform,
+                    model = state.selectedModel,
+                    systemPrompt = state.systemPrompt
+                )
+                kotlinx.coroutines.delay(50)
+                id
+            }
+
+            val userMessage = ChatMessage(
+                role = MessageRole.USER,
+                content = text,
+                platform = state.selectedPlatform,
+                model = state.selectedModel,
+                attachments = attachments
+            )
+
+            // 更新 UI 并清空输入
+            _uiState.update {
+                it.copy(
+                    inputText = "",
+                    pendingAttachments = emptyList(),
+                    isLoading = true,
+                    isTyping = true,
+                    error = null,
+                    estimatedInputTokens = 0
+                )
+            }
+
+            // 流式或非流式
+            // 注意：非流式路径由 SendMessageUseCase 内部负责持久化用户消息；
+            // 流式路径需要手动持久化（因 SendMessageStreamUseCase 不写库）
+            val settings = state.settings
+            if (settings.enableStreamResponse) {
+                chatSessionRepository.addMessageToSession(sessionId, userMessage)
+                sendStreaming(sessionId, userMessage, settings)
+            } else {
+                sendNonStreaming(sessionId, userMessage, settings)
+            }
+        }
+    }
+
+    private fun sendStreaming(sessionId: String, userMessage: ChatMessage, settings: AppSettings) {
+        streamingJob = viewModelScope.launch {
+            // 创建占位 assistant 消息
+            val placeholder = ChatMessage(
+                role = MessageRole.ASSISTANT,
+                content = "",
+                platform = _uiState.value.selectedPlatform,
+                model = _uiState.value.selectedModel,
+                isStreaming = true
+            )
+            chatSessionRepository.addMessageToSession(sessionId, placeholder)
+            _uiState.update { it.copy(isStreaming = true, isLoading = false, isTyping = true) }
+
+            val accumulated = StringBuilder()
+            val session = chatSessionRepository.getSession(sessionId) ?: return@launch
+            val trimmedMessages = ContextManager.trim(session).filter { it.id != placeholder.id }
+
+            try {
+                sendMessageStreamUseCase(
+                    messages = trimmedMessages,
+                    platform = _uiState.value.selectedPlatform,
+                    model = _uiState.value.selectedModel,
+                    temperature = settings.defaultTemperature,
+                    maxTokens = settings.defaultMaxTokens,
+                    endpoint = _uiState.value.activeAPIKey?.getEndpoint() ?: _uiState.value.selectedPlatform.defaultEndpoint,
+                    systemPrompt = _uiState.value.systemPrompt.ifBlank { session.systemPrompt }
+                ).collect { chunk ->
+                    accumulated.append(chunk)
+                    val updatedMsg = placeholder.copy(content = accumulated.toString())
+                    updateMessageInUiAndDb(sessionId, updatedMsg)
+                }
+
+                // 完成
+                val finalMsg = placeholder.copy(content = accumulated.toString(), isStreaming = false)
+                updateMessageInUiAndDb(sessionId, finalMsg)
+                logManager.info("Chat", "流式完成: ${accumulated.length} chars")
+            } catch (e: Exception) {
+                val errMsg = placeholder.copy(
+                    content = if (accumulated.isEmpty()) "请求失败: ${e.message}" else accumulated.toString(),
+                    isStreaming = false,
+                    isError = accumulated.isEmpty()
+                )
+                updateMessageInUiAndDb(sessionId, errMsg)
+                _uiState.update { it.copy(error = e.message) }
+                logManager.error("Chat", "流式失败: ${e.message}")
+            } finally {
+                _uiState.update { it.copy(isStreaming = false, isLoading = false, isTyping = false) }
+            }
+        }
+    }
+
+    private suspend fun updateMessageInUiAndDb(sessionId: String, message: ChatMessage) {
+        val session = chatSessionRepository.getSession(sessionId) ?: return
+        val updatedMessages = session.messages.map { if (it.id == message.id) message else it }
+        val updatedSession = session.copy(messages = updatedMessages, updatedAt = System.currentTimeMillis())
+        chatSessionRepository.updateSession(updatedSession)
+        _uiState.update {
+            it.copy(
+                currentSession = updatedSession,
+                messages = updatedMessages,
+                estimatedSessionTokens = TokenEstimator.estimateSession(updatedSession)
+            )
+        }
+    }
+
+    private fun sendNonStreaming(sessionId: String, userMessage: ChatMessage, settings: AppSettings) {
+        viewModelScope.launch {
+            val result = sendMessageUseCase(
+                sessionId = sessionId,
+                userMessage = userMessage,
+                platform = _uiState.value.selectedPlatform,
+                model = _uiState.value.selectedModel,
+                temperature = settings.defaultTemperature,
+                maxTokens = settings.defaultMaxTokens,
+                attachments = userMessage.attachments,
+                systemPrompt = _uiState.value.systemPrompt
+            )
+
+            result.onSuccess { resp ->
+                val assistantMsg = ChatMessage(
+                    role = MessageRole.ASSISTANT,
+                    content = resp.content,
+                    platform = resp.platform,
+                    model = resp.model,
+                    usage = resp.usage
+                )
+                chatSessionRepository.addMessageToSession(sessionId, assistantMsg)
+                logManager.info("Chat", "回复完成: ${resp.content.length} chars")
+            }.onFailure { e ->
+                val errMsg = ChatMessage(
+                    role = MessageRole.ASSISTANT,
+                    content = "请求失败: ${e.message}",
+                    isError = true
+                )
+                chatSessionRepository.addMessageToSession(sessionId, errMsg)
+                _uiState.update { it.copy(error = e.message) }
+                logManager.error("Chat", "请求失败: ${e.message}")
+            }
+            _uiState.update { it.copy(isLoading = false, isTyping = false) }
+        }
+    }
+
+    fun stopGeneration() {
+        streamingJob?.cancel()
+        streamingJob = null
+        _uiState.update { it.copy(isStreaming = false, isLoading = false, isTyping = false) }
+        logManager.warn("Chat", "用户停止生成")
+    }
+
+    // ============ 消息操作 ============
+
+    fun deleteMessage(messageId: String) {
+        val sessionId = _uiState.value.currentSession?.id ?: return
+        viewModelScope.launch {
+            deleteMessageUseCase(sessionId, messageId)
+            val session = chatSessionRepository.getSession(sessionId)
+            if (session != null) {
+                _uiState.update {
+                    it.copy(currentSession = session, messages = session.messages)
+                }
+            }
+        }
+    }
+
+    fun regenerateMessage(messageId: String) {
+        val state = _uiState.value
+        val session = state.currentSession ?: return
+        val messages = session.messages
+        val targetIdx = messages.indexOfFirst { it.id == messageId }
+        if (targetIdx < 0) return
+
+        // 找到上一条用户消息
+        val lastUserIdx = (0 until targetIdx).lastOrNull { messages[it].role == MessageRole.USER } ?: return
+        val lastUserMsg = messages[lastUserIdx]
+
+        // 删除原回复
+        viewModelScope.launch {
+            deleteMessageUseCase(session.id, messageId)
+            // 将上一条用户消息重新作为输入
+            _uiState.update {
+                it.copy(inputText = lastUserMsg.content, pendingAttachments = lastUserMsg.attachments)
+            }
+            // 删除原 user 消息（因为 sendMessage 会再次添加）
+            deleteMessageUseCase(session.id, lastUserMsg.id)
+            sendMessage()
+        }
+    }
+
+    fun copyMessage(content: String) {
+        // 实际复制操作由 UI 层 ClipboardManager 完成；此处仅记录日志
+        logManager.info("Chat", "已复制消息 (${content.length} chars)")
+    }
+
+    fun clearError() {
+        _uiState.update { it.copy(error = null) }
+    }
+
+    fun showAPIKeyDialog(show: Boolean) {
+        _uiState.update { it.copy(showAPIKeyDialog = show) }
+    }
+
+    /** 根据当前会话生成会话标题 */
+    fun autoGenerateTitle() {
+        val session = _uiState.value.currentSession ?: return
+        val firstUserMsg = session.messages.firstOrNull { it.role == MessageRole.USER }
+        if (firstUserMsg != null && session.title == "新对话") {
+            val newTitle = firstUserMsg.content.take(20).replace("\n", " ").trim().ifBlank { "新对话" }
+            viewModelScope.launch {
+                updateSessionUseCase(session.copy(title = newTitle))
+            }
+        }
     }
 }

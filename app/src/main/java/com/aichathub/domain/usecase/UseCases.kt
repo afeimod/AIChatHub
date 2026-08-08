@@ -1,135 +1,83 @@
 package com.aichathub.domain.usecase
 
-import com.aichathub.domain.model.AIPlatform
-import com.aichathub.domain.model.APIKeyInfo
-import com.aichathub.domain.model.AppSettings
-import com.aichathub.domain.model.ChatMessage
-import com.aichathub.domain.model.ChatSession
-import com.aichathub.domain.model.MessageAttachment
-import com.aichathub.domain.model.MessageRole
-import com.aichathub.domain.model.SendMessageResponse
-import com.aichathub.domain.repository.AIServiceRepository
-import com.aichathub.domain.repository.APIKeyRepository
-import com.aichathub.domain.repository.ChatSessionRepository
-import com.aichathub.domain.repository.SettingsRepository
+import com.aichathub.domain.model.*
+import com.aichathub.domain.repository.*
+import com.aichathub.domain.util.ContextManager
+import com.aichathub.domain.util.TokenEstimator
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import javax.inject.Inject
 
-/**
- * 发送消息用例
- * 支持多模态：包含文件附件的消息
- */
-class SendMessageUseCase @Inject constructor(
-    private val aiServiceRepository: AIServiceRepository,
-    private val apiKeyRepository: APIKeyRepository,
-    private val chatSessionRepository: ChatSessionRepository
+// ==================== 会话 ====================
+
+class CreateSessionUseCase @Inject constructor(
+    private val chatSessionRepository: ChatSessionRepository,
+    private val settingsRepository: SettingsRepository
 ) {
     suspend operator fun invoke(
-        sessionId: String,
-        userMessage: String,
-        platform: AIPlatform,
-        model: String,
-        temperature: Float = 0.7f,
-        maxTokens: Int = 8192,  // 增加输出长度限制
-        attachments: List<MessageAttachment> = emptyList()  // 新增：附件列表参数
-    ): Result<SendMessageResponse> {
-        // 获取会话
-        val session = chatSessionRepository.getSession(sessionId)
-            ?: return Result.failure(Exception("会话不存在"))
-
-        // 获取API密钥（从Flow中获取第一个值）
-        val apiKeyInfo = apiKeyRepository.getActiveAPIKey().first()
-            ?: return Result.failure(Exception("请先配置API密钥"))
-
-        val decryptedKey = apiKeyRepository.getDecryptedAPIKey(apiKeyInfo.id)
-            ?: return Result.failure(Exception("无法获取API密钥"))
-
-        // 允许用户在不同平台间切换API密钥（因为用户可能配置了自定义端点）
-        // 只要能获取到解密后的密钥就允许发送
-
-        // 构建消息列表
-        val messages = session.messages.toMutableList().apply {
-            // 如果有附件，添加到消息中
-            val messageWithAttachments = ChatMessage(
-                role = MessageRole.USER,
-                content = userMessage,
-                platform = platform,
-                model = model,
-                attachments = attachments  // 新增：包含附件
-            )
-            add(messageWithAttachments)
-        }
-
-        // 发送请求（messages 包含附件信息，仓库层会处理）
-        val result = aiServiceRepository.sendMessage(
-            platform = platform,
-            apiKey = decryptedKey,
-            model = model,
-            endpoint = apiKeyInfo.getEndpoint(),
-            messages = messages,
-            temperature = temperature,
-            maxTokens = maxTokens
-        )
-
-        // 如果成功，保存用户消息和AI响应
-        if (result.isSuccess) {
-            val response = result.getOrThrow()
-            messages.add(
-                ChatMessage(
-                    role = MessageRole.ASSISTANT,
-                    content = response.content,
-                    platform = platform,
-                    model = model
-                )
-            )
-
-            // 更新会话
-            val updatedSession = session.copy(
-                messages = messages,
-                updatedAt = System.currentTimeMillis()
-            )
-            chatSessionRepository.updateSession(updatedSession)
-        }
-
-        return result
-    }
-}
-
-/**
- * 创建新对话用例
- */
-class CreateSessionUseCase @Inject constructor(
-    private val chatSessionRepository: ChatSessionRepository
-) {
-    suspend operator fun invoke(title: String = "新对话"): String {
+        title: String = "新对话",
+        platform: AIPlatform? = null,
+        model: String? = null,
+        systemPrompt: String = ""
+    ): String {
+        val settings = settingsRepository.getSettings().first()
+        val p = platform ?: settings.defaultPlatform
+        val m = model ?: p.defaultModel
         val session = ChatSession(
             title = title,
-            platform = AIPlatform.DEEPSEEK,
-            model = AIPlatform.DEEPSEEK.defaultModel
+            platform = p,
+            model = m,
+            systemPrompt = systemPrompt,
+            contextStrategy = settings.defaultContextStrategy,
+            contextMaxTokens = settings.defaultContextMaxTokens
         )
         return chatSessionRepository.createSession(session)
     }
 }
 
-/**
- * 获取API密钥列表用例
- */
+class DeleteSessionUseCase @Inject constructor(
+    private val chatSessionRepository: ChatSessionRepository
+) {
+    suspend operator fun invoke(id: String) = chatSessionRepository.deleteSession(id)
+}
+
+class ClearAllSessionsUseCase @Inject constructor(
+    private val chatSessionRepository: ChatSessionRepository
+) {
+    suspend operator fun invoke() = chatSessionRepository.clearAllSessions()
+}
+
+class UpdateSessionUseCase @Inject constructor(
+    private val chatSessionRepository: ChatSessionRepository
+) {
+    suspend operator fun invoke(session: ChatSession) = chatSessionRepository.updateSession(session)
+}
+
+class DeleteMessageUseCase @Inject constructor(
+    private val chatSessionRepository: ChatSessionRepository
+) {
+    suspend operator fun invoke(sessionId: String, messageId: String) =
+        chatSessionRepository.deleteMessage(sessionId, messageId)
+}
+
+class UpdateMessageUseCase @Inject constructor(
+    private val chatSessionRepository: ChatSessionRepository
+) {
+    suspend operator fun invoke(sessionId: String, message: ChatMessage) =
+        chatSessionRepository.updateMessage(sessionId, message)
+}
+
+// ==================== API Key ====================
+
 class GetAPIKeysUseCase @Inject constructor(
     private val apiKeyRepository: APIKeyRepository
 ) {
-    operator fun invoke(): Flow<List<APIKeyInfo>> {
-        return apiKeyRepository.getAllAPIKeys()
-    }
+    operator fun invoke(): Flow<List<APIKeyInfo>> = apiKeyRepository.getAllAPIKeys()
 
-    fun byPlatform(platform: AIPlatform): Flow<List<APIKeyInfo>> {
-        return apiKeyRepository.getAPIKeysByPlatform(platform)
-    }
+    fun byPlatform(platform: AIPlatform): Flow<List<APIKeyInfo>> =
+        apiKeyRepository.getAPIKeysByPlatform(platform)
 }
 
-/**
- * 添加API密钥用例
- */
 class AddAPIKeyUseCase @Inject constructor(
     private val apiKeyRepository: APIKeyRepository
 ) {
@@ -137,136 +85,256 @@ class AddAPIKeyUseCase @Inject constructor(
         platform: AIPlatform,
         apiKey: String,
         name: String,
-        customEndpoint: String? = null
-    ): Result<Unit> {
-        return try {
-            if (apiKey.isBlank()) {
-                return Result.failure(Exception("API密钥不能为空"))
-            }
-
-            val info = APIKeyInfo(
-                id = java.util.UUID.randomUUID().toString(),
-                platform = platform,
-                apiKey = apiKey,
-                name = name.ifBlank { platform.displayName },
-                customEndpoint = customEndpoint
-            )
-            apiKeyRepository.addAPIKey(info)
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+        customEndpoint: String? = null,
+        customModels: List<String> = emptyList(),
+        customModelOverride: String? = null,
+        customProviderId: String? = null
+    ) {
+        val info = APIKeyInfo(
+            id = java.util.UUID.randomUUID().toString(),
+            platform = platform,
+            apiKey = apiKey,
+            name = name.ifBlank { platform.displayName },
+            customEndpoint = customEndpoint?.ifBlank { null },
+            customModels = customModels,
+            customModelOverride = customModelOverride,
+            customProviderId = customProviderId,
+            isActive = false,
+            createdAt = System.currentTimeMillis()
+        )
+        apiKeyRepository.addAPIKey(info)
     }
 }
 
-/**
- * 删除API密钥用例
- */
+class UpdateAPIKeyUseCase @Inject constructor(
+    private val apiKeyRepository: APIKeyRepository
+) {
+    suspend operator fun invoke(info: APIKeyInfo) = apiKeyRepository.updateAPIKey(info)
+}
+
 class DeleteAPIKeyUseCase @Inject constructor(
     private val apiKeyRepository: APIKeyRepository
 ) {
-    suspend operator fun invoke(id: String): Result<Unit> {
-        return try {
-            apiKeyRepository.deleteAPIKey(id)
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
+    suspend operator fun invoke(id: String) = apiKeyRepository.deleteAPIKey(id)
 }
 
-/**
- * 设置活跃API密钥用例
- */
 class SetActiveAPIKeyUseCase @Inject constructor(
     private val apiKeyRepository: APIKeyRepository
 ) {
-    suspend operator fun invoke(id: String): Result<Unit> {
-        return try {
-            apiKeyRepository.setActiveAPIKey(id)
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
+    suspend operator fun invoke(id: String) = apiKeyRepository.setActiveAPIKey(id)
 }
 
-/**
- * 测试API连接用例
- */
 class TestConnectionUseCase @Inject constructor(
-    private val aiServiceRepository: AIServiceRepository
+    private val aiServiceRepository: AIServiceRepository,
+    private val apiKeyRepository: APIKeyRepository,
+    private val customProviderRepository: CustomProviderRepository
 ) {
+    suspend operator fun invoke(
+        platform: AIPlatform,
+        keyId: String,
+        endpoint: String,
+        model: String
+    ): Result<Boolean> {
+        val apiKey = apiKeyRepository.getDecryptedAPIKey(keyId) ?: return Result.failure(IllegalStateException("Key not found"))
+        val customProvider = keyId.let { id ->
+            runCatching { customProviderRepository.getProvider(id) }.getOrNull()
+        }
+        // 当 keyId 是 APIKeyInfo 而非 CustomProvider 时，customProvider 为 null
+        return aiServiceRepository.testConnection(platform, apiKey, endpoint, model, customProvider = null)
+    }
+
     suspend operator fun invoke(
         platform: AIPlatform,
         apiKey: String,
         endpoint: String,
-        model: String
-    ): Result<Boolean> {
-        return aiServiceRepository.testConnection(
+        model: String,
+        customProvider: CustomProvider? = null
+    ): Result<Boolean> = aiServiceRepository.testConnection(platform, apiKey, endpoint, model, customProvider)
+}
+
+// ==================== 发送消息 ====================
+
+class SendMessageUseCase @Inject constructor(
+    private val aiServiceRepository: AIServiceRepository,
+    private val chatSessionRepository: ChatSessionRepository,
+    private val apiKeyRepository: APIKeyRepository,
+    private val customProviderRepository: CustomProviderRepository
+) {
+    suspend operator fun invoke(
+        sessionId: String,
+        userMessage: ChatMessage,
+        platform: AIPlatform,
+        model: String,
+        temperature: Float = 0.7f,
+        maxTokens: Int = 4096,
+        attachments: List<MessageAttachment> = emptyList(),
+        systemPrompt: String = "",
+        customProviderId: String? = null
+    ): Result<SendMessageResponse> {
+        val session = chatSessionRepository.getSession(sessionId) ?: return Result.failure(IllegalStateException("Session not found"))
+        val activeKey = apiKeyRepository.getActiveAPIKey().first() ?: return Result.failure(IllegalStateException("No active API key"))
+        val apiKey = apiKeyRepository.getDecryptedAPIKey(activeKey.id) ?: return Result.failure(IllegalStateException("Cannot decrypt API key"))
+
+        val customProvider = if (customProviderId != null) customProviderRepository.getProvider(customProviderId) else null
+
+        val updatedMessages = session.messages + userMessage
+        val updatedSession = session.copy(messages = updatedMessages, updatedAt = System.currentTimeMillis())
+        chatSessionRepository.updateSession(updatedSession)
+
+        val trimmedMessages = ContextManager.trim(updatedSession)
+
+        return aiServiceRepository.sendMessage(
             platform = platform,
             apiKey = apiKey,
-            endpoint = endpoint,
-            model = model
+            model = model,
+            endpoint = activeKey.getEndpoint(),
+            messages = trimmedMessages,
+            temperature = temperature,
+            maxTokens = maxTokens,
+            systemPrompt = systemPrompt.ifBlank { session.systemPrompt },
+            customProvider = customProvider
         )
     }
 }
 
-/**
- * 获取设置用例
- */
+class SendMessageStreamUseCase @Inject constructor(
+    private val aiServiceRepository: AIServiceRepository,
+    private val apiKeyRepository: APIKeyRepository,
+    private val customProviderRepository: CustomProviderRepository
+) {
+    operator fun invoke(
+        messages: List<ChatMessage>,
+        platform: AIPlatform,
+        model: String,
+        temperature: Float = 0.7f,
+        maxTokens: Int = 4096,
+        endpoint: String,
+        systemPrompt: String = "",
+        customProviderId: String? = null
+    ): Flow<String> {
+        return kotlinx.coroutines.flow.flow {
+            val activeKey = apiKeyRepository.getActiveAPIKey().first() ?: throw IllegalStateException("No active API key")
+            val apiKey = apiKeyRepository.getDecryptedAPIKey(activeKey.id) ?: throw IllegalStateException("Cannot decrypt API key")
+            val customProvider = if (customProviderId != null) customProviderRepository.getProvider(customProviderId) else null
+            val trimmed = if (messages.size > 50) messages.takeLast(50) else messages
+            aiServiceRepository.sendMessageStream(
+                platform = platform,
+                apiKey = apiKey,
+                model = model,
+                endpoint = endpoint,
+                messages = trimmed,
+                temperature = temperature,
+                maxTokens = maxTokens,
+                systemPrompt = systemPrompt,
+                customProvider = customProvider
+            ).collect { emit(it) }
+        }
+    }
+}
+
+// ==================== 设置 ====================
+
 class GetSettingsUseCase @Inject constructor(
     private val settingsRepository: SettingsRepository
 ) {
-    operator fun invoke(): Flow<AppSettings> {
-        return settingsRepository.getSettings()
-    }
+    operator fun invoke(): Flow<AppSettings> = settingsRepository.getSettings()
 }
 
-/**
- * 更新设置用例
- */
 class UpdateSettingsUseCase @Inject constructor(
     private val settingsRepository: SettingsRepository
 ) {
-    suspend operator fun invoke(settings: AppSettings): Result<Unit> {
-        return try {
-            settingsRepository.updateSettings(settings)
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
+    suspend operator fun invoke(settings: AppSettings) = settingsRepository.updateSettings(settings)
 }
 
-/**
- * 删除对话会话用例
- */
-class DeleteSessionUseCase @Inject constructor(
-    private val chatSessionRepository: ChatSessionRepository
+// ==================== 自定义平台 ====================
+
+class GetCustomProvidersUseCase @Inject constructor(
+    private val customProviderRepository: CustomProviderRepository
 ) {
-    suspend operator fun invoke(sessionId: String): Result<Unit> {
-        return try {
-            chatSessionRepository.deleteSession(sessionId)
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
+    operator fun invoke(): Flow<List<CustomProvider>> = customProviderRepository.getAllProviders()
 }
 
-/**
- * 清空所有对话用例
- */
-class ClearAllSessionsUseCase @Inject constructor(
-    private val chatSessionRepository: ChatSessionRepository
+class AddCustomProviderUseCase @Inject constructor(
+    private val customProviderRepository: CustomProviderRepository
 ) {
-    suspend operator fun invoke(): Result<Unit> {
-        return try {
-            chatSessionRepository.clearAllSessions()
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
+    suspend operator fun invoke(provider: CustomProvider): String = customProviderRepository.addProvider(provider)
+}
+
+class UpdateCustomProviderUseCase @Inject constructor(
+    private val customProviderRepository: CustomProviderRepository
+) {
+    suspend operator fun invoke(provider: CustomProvider) = customProviderRepository.updateProvider(provider)
+}
+
+class DeleteCustomProviderUseCase @Inject constructor(
+    private val customProviderRepository: CustomProviderRepository
+) {
+    suspend operator fun invoke(id: String) = customProviderRepository.deleteProvider(id)
+}
+
+// ==================== 工作目录 ====================
+
+class GetWorkspaceSettingsUseCase @Inject constructor(
+    private val workspaceRepository: WorkspaceRepository
+) {
+    operator fun invoke(): Flow<WorkspaceSettings> = workspaceRepository.getSettings()
+}
+
+class UpdateWorkspaceSettingsUseCase @Inject constructor(
+    private val workspaceRepository: WorkspaceRepository
+) {
+    suspend operator fun invoke(settings: WorkspaceSettings) = workspaceRepository.updateSettings(settings)
+}
+
+class ListWorkspaceFilesUseCase @Inject constructor(
+    private val workspaceRepository: WorkspaceRepository
+) {
+    suspend operator fun invoke(): List<WorkspaceFile> = workspaceRepository.listFiles()
+}
+
+class WriteWorkspaceFileUseCase @Inject constructor(
+    private val workspaceRepository: WorkspaceRepository
+) {
+    suspend operator fun invoke(fileName: String, content: ByteArray): Boolean =
+        workspaceRepository.writeFile(fileName, content)
+}
+
+class WriteWorkspaceTextUseCase @Inject constructor(
+    private val workspaceRepository: WorkspaceRepository
+) {
+    suspend operator fun invoke(fileName: String, text: String): Boolean =
+        workspaceRepository.writeFile(fileName, text.toByteArray())
+}
+
+class DeleteWorkspaceFileUseCase @Inject constructor(
+    private val workspaceRepository: WorkspaceRepository
+) {
+    suspend operator fun invoke(fileName: String): Boolean = workspaceRepository.deleteFile(fileName)
+}
+
+class ReadWorkspaceFileUseCase @Inject constructor(
+    private val workspaceRepository: WorkspaceRepository
+) {
+    suspend operator fun invoke(fileName: String): ByteArray? = workspaceRepository.readFile(fileName)
+}
+
+// ==================== 终端日志 ====================
+
+class GetTerminalLogsUseCase @Inject constructor(
+    private val terminalLogRepository: TerminalLogRepository
+) {
+    operator fun invoke(): Flow<List<TerminalLog>> = terminalLogRepository.getLogs()
+}
+
+class ClearTerminalLogsUseCase @Inject constructor(
+    private val terminalLogRepository: TerminalLogRepository
+) {
+    suspend operator fun invoke() = terminalLogRepository.clearLogs()
+}
+
+// ==================== Token 估算 ====================
+
+class EstimateTokensUseCase @Inject constructor() {
+    operator fun invoke(text: String): Int = TokenEstimator.estimateText(text)
+    operator fun invoke(session: ChatSession): Int = TokenEstimator.estimateSession(session)
 }

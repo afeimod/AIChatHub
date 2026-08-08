@@ -10,6 +10,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 
 // 颜色定义
@@ -33,6 +37,28 @@ val DeepSeekColor = Color(0xFF6B5CE7)
 val MiniMaxColor = Color(0xFFFF6B6B)
 val OpenAIColor = Color(0xFF10A37F)
 val GeminiColor = Color(0xFF4285F4)
+val AnthropicColor = Color(0xFFD97757)
+val QwenColor = Color(0xFF615CED)
+val ZhipuColor = Color(0xFF3859FF)
+val MoonshotColor = Color(0xFF1D1D1F)
+val YiColor = Color(0xFF003D2E)
+val BaichuanColor = Color(0xFFFF8C00)
+val DoubaoColor = Color(0xFF3D5AFE)
+val HunyuanColor = Color(0xFF0053E0)
+val SparkColor = Color(0xFFEE6C4D)
+val SiliconFlowColor = Color(0xFF155EEF)
+val GroqColor = Color(0xFFF55036)
+val TogetherColor = Color(0xFF0F6FFF)
+val OpenRouterColor = Color(0xFF6466F1)
+val CustomColor = Color(0xFF607D8B)
+
+// 终端颜色
+val TerminalBg = Color(0xFF1E1E1E)
+val TerminalText = Color(0xFFD4D4D4)
+val TerminalAccent = Color(0xFF569CD6)
+val TerminalError = Color(0xFFEF5350)
+val TerminalWarn = Color(0xFFFFB74D)
+val TerminalSuccess = Color(0xFF81C784)
 
 private val DarkColorScheme = darkColorScheme(
     primary = PrimaryBlue,
@@ -63,7 +89,7 @@ private val LightColorScheme = lightColorScheme(
 @Composable
 fun AIChatHubTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    dynamicColor: Boolean = true,
+    dynamicColor: Boolean = false,  // 默认关闭动态颜色，使用品牌色
     content: @Composable () -> Unit
 ) {
     val colorScheme = when {
@@ -79,16 +105,41 @@ fun AIChatHubTheme(
     if (!view.isInEditMode) {
         SideEffect {
             val window = (view.context as Activity).window
-            window.statusBarColor = colorScheme.primary.toArgb()
+            window.statusBarColor = colorScheme.background.toArgb()
             WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !darkTheme
         }
     }
 
     MaterialTheme(
         colorScheme = colorScheme,
-        typography = Typography,
+        typography = AppTypography,
         content = content
     )
 }
 
-val Typography = Typography()
+val AppTypography = Typography(
+    bodyLarge = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.Normal,
+        fontSize = 15.sp,
+        lineHeight = 22.sp
+    ),
+    bodyMedium = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.Normal,
+        fontSize = 13.sp,
+        lineHeight = 18.sp
+    ),
+    titleLarge = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.Bold,
+        fontSize = 20.sp,
+        lineHeight = 26.sp
+    ),
+    labelSmall = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.Medium,
+        fontSize = 11.sp,
+        lineHeight = 14.sp
+    )
+)
