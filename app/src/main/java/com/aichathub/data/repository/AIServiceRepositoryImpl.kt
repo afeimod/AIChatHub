@@ -471,7 +471,7 @@ class AIServiceRepositoryImpl @Inject constructor(
 
     // ============ SSE 通用执行 ============
 
-    private suspend inline fun executeSse(request: Request, crossinline onLine: (String) -> Unit) = withContext(Dispatchers.IO) {
+    private suspend fun executeSse(request: Request, onLine: suspend (String) -> Unit) = withContext(Dispatchers.IO) {
         val response: Response = httpClient.newCall(request).execute()
         response.use { resp ->
             if (!resp.isSuccessful) {

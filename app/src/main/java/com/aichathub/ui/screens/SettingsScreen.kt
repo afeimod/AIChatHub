@@ -56,7 +56,7 @@ fun SettingsScreen(
                         checked = settings.isDarkMode,
                         onChange = { viewModel.toggleDarkMode() }
                     )
-                    HorizontalDivider()
+                    Divider()
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text("字体大小", fontSize = 14.sp, fontWeight = FontWeight.Medium)
                         Slider(
@@ -67,7 +67,7 @@ fun SettingsScreen(
                         )
                         Text("当前: ${"%.1f".format(settings.fontSizeScale)}x", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
                     }
-                    HorizontalDivider()
+                    Divider()
                     SwitchItem(
                         title = "Markdown 渲染",
                         subtitle = "在 AI 回复中渲染格式化文本与代码块",
@@ -99,7 +99,7 @@ fun SettingsScreen(
                             }
                         }
                     }
-                    HorizontalDivider()
+                    Divider()
                     SliderItem(
                         title = "Temperature",
                         subtitle = "值越高回复越发散",
@@ -109,7 +109,7 @@ fun SettingsScreen(
                         onChange = viewModel::updateDefaultTemperature,
                         display = "%.2f"
                     )
-                    HorizontalDivider()
+                    Divider()
                     SliderItem(
                         title = "Max Tokens",
                         subtitle = "单次回复最大长度",
@@ -139,7 +139,7 @@ fun SettingsScreen(
                             }
                         }
                     }
-                    HorizontalDivider()
+                    Divider()
                     SliderItem(
                         title = "最大上下文 Token",
                         subtitle = "UNLIMITED 模式下的提示阈值",
@@ -149,7 +149,7 @@ fun SettingsScreen(
                         onChange = { viewModel.updateContextMaxTokens(it.toInt()) },
                         display = "%.0f"
                     )
-                    HorizontalDivider()
+                    Divider()
                     SwitchItem(
                         title = "Token 计数器",
                         subtitle = "在聊天界面显示输入/会话 token 估算",
@@ -171,7 +171,7 @@ fun SettingsScreen(
                         checked = settings.enableStreamResponse,
                         onChange = { viewModel.toggleStreamResponse() }
                     )
-                    HorizontalDivider()
+                    Divider()
                     SwitchItem(
                         title = "多模态输入",
                         subtitle = "支持发送图片与文档附件",
@@ -179,7 +179,7 @@ fun SettingsScreen(
                         checked = settings.enableMultimodal,
                         onChange = { viewModel.toggleMultimodal() }
                     )
-                    HorizontalDivider()
+                    Divider()
                     SwitchItem(
                         title = "自动生成标题",
                         subtitle = "使用第一条消息作为会话标题",
@@ -201,7 +201,7 @@ fun SettingsScreen(
                         checked = settings.enableTerminalLog,
                         onChange = { viewModel.toggleTerminalLog() }
                     )
-                    HorizontalDivider()
+                    Divider()
                     ListItem(
                         headlineContent = { Text("自定义平台") },
                         supportingContent = { Text("添加 OpenAI 兼容端点") },
@@ -209,7 +209,7 @@ fun SettingsScreen(
                         trailingContent = { Icon(Icons.Filled.ChevronRight, null) },
                         modifier = Modifier.clickable { onNavigateToCustomProviders() }
                     )
-                    HorizontalDivider()
+                    Divider()
                     SliderItem(
                         title = "最大历史会话数",
                         subtitle = "超过此数量会自动清理最旧的会话",

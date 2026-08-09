@@ -1,6 +1,7 @@
 package com.aichathub.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -188,6 +189,7 @@ private fun DialogItem(icon: ImageVector, label: String, onClick: () -> Unit) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PlatformSelector(
     selected: AIPlatform,
@@ -217,6 +219,7 @@ fun PlatformSelector(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ModelSelector(
     selected: String,
@@ -246,7 +249,7 @@ fun ModelSelector(
                 )
             }
             if (customInputEnabled) {
-                HorizontalDivider()
+                Divider()
                 DropdownMenuItem(
                     text = { Text("✎ 自定义模型名…") },
                     onClick = { useCustom = true; expanded = false }

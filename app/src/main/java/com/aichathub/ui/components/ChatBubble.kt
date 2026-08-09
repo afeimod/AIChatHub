@@ -3,6 +3,7 @@ package com.aichathub.ui.components
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -225,7 +226,7 @@ fun AttachmentChip(att: com.aichathub.domain.model.MessageAttachment) {
 @Composable
 fun TypingIndicator() {
     val infiniteTransition = androidx.compose.animation.core.rememberInfiniteTransition(label = "typing")
-    val scale by infiniteTransition.animateFloat(
+    val scale: Float by infiniteTransition.animateFloat(
         initialValue = 0.6f,
         targetValue = 1.0f,
         animationSpec = androidx.compose.animation.core.infiniteRepeatable(
@@ -239,11 +240,12 @@ fun TypingIndicator() {
         horizontalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         repeat(3) { i ->
+            val alpha: Float = if (i == 0) 0.4f + 0.3f * scale else 0.4f + 0.3f * (1f - scale)
             Box(
                 modifier = Modifier
                     .size(8.dp)
                     .clip(RoundedCornerShape(4.dp))
-                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.4f + 0.3f * (if (i == 0) scale else 1f - scale)))
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = alpha))
             )
         }
     }
