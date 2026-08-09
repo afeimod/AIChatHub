@@ -10,6 +10,7 @@ import com.aichathub.domain.util.ContextManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -180,7 +181,7 @@ class AIServiceRepositoryImpl @Inject constructor(
         executeSse(reqBuilder.build()) { line ->
             parseOpenAIStreamChunk(line)?.let { emit(it) }
         }
-    }
+    }.flowOn(Dispatchers.IO)
 
     private fun buildOpenAIRequest(
         model: String,
@@ -281,7 +282,7 @@ class AIServiceRepositoryImpl @Inject constructor(
         executeSse(req) { line ->
             parseAnthropicStreamChunk(line)?.let { emit(it) }
         }
-    }
+    }.flowOn(Dispatchers.IO)
 
     private fun buildAnthropicRequest(
         model: String,
@@ -362,7 +363,7 @@ class AIServiceRepositoryImpl @Inject constructor(
         executeSse(req) { line ->
             parseGeminiStreamChunk(line, json)?.let { emit(it) }
         }
-    }
+    }.flowOn(Dispatchers.IO)
 
     private fun buildGeminiRequest(
         messages: List<ChatMessage>,
@@ -448,7 +449,7 @@ class AIServiceRepositoryImpl @Inject constructor(
             .header("Authorization", "Bearer $apiKey")
             .build()
         executeSse(req) { line -> parseOpenAIStreamChunk(line)?.let { emit(it) } }
-    }
+    }.flowOn(Dispatchers.IO)
 
     // ============ 自定义平台 ============
 
@@ -470,8 +471,10 @@ class AIServiceRepositoryImpl @Inject constructor(
     }
 
     // ============ SSE 通用执行 ============
+    // 注意：此函数本身不再切换 Dispatcher，由调用方的 Flow 通过 flowOn(Dispatchers.IO)
+    // 统一切换，避免 "Flow invariant is violated" 错误
 
-    private suspend fun executeSse(request: Request, onLine: suspend (String) -> Unit) = withContext(Dispatchers.IO) {
+    private suspend fun executeSse(request: Request, onLine: suspend (String) -> Unit) {
         val response: Response = httpClient.newCall(request).execute()
         response.use { resp ->
             if (!resp.isSuccessful) {

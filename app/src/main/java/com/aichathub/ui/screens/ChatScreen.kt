@@ -3,6 +3,9 @@ package com.aichathub.ui.screens
 import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -115,18 +118,25 @@ fun ChatScreen(
             )
         },
         bottomBar = {
-            MessageInputWithAttachment(
-                text = uiState.inputText,
-                onTextChange = viewModel::updateInputText,
-                onSendClick = { viewModel.sendMessage() },
-                onAttachClick = { showAttachmentDialog = true },
-                isSending = uiState.isLoading,
-                isStreaming = uiState.isStreaming,
-                activeAPIKey = uiState.activeAPIKey,
-                pendingAttachments = uiState.pendingAttachments,
-                onRemoveAttachment = viewModel::removeAttachment,
-                onStopClick = viewModel::stopGeneration
-            )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .imePadding()
+            ) {
+                MessageInputWithAttachment(
+                    text = uiState.inputText,
+                    onTextChange = viewModel::updateInputText,
+                    onSendClick = { viewModel.sendMessage() },
+                    onAttachClick = { showAttachmentDialog = true },
+                    isSending = uiState.isLoading,
+                    isStreaming = uiState.isStreaming,
+                    activeAPIKey = uiState.activeAPIKey,
+                    pendingAttachments = uiState.pendingAttachments,
+                    onRemoveAttachment = viewModel::removeAttachment,
+                    onStopClick = viewModel::stopGeneration
+                )
+            }
         }
     ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
