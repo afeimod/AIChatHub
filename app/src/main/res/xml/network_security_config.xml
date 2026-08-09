@@ -18,7 +18,6 @@
         <domain includeSubdomains="true">api.lingyiwanwu.com</domain>
         <domain includeSubdomains="true">api.baichuan-ai.com</domain>
         <domain includeSubdomains="true">ark.cn-beijing.volces.com</domain>
-        <domain includeSubdomains="true">api.minimaxi.com</domain>
         <domain includeSubdomains="true">localhost</domain>
         <domain includeSubdomains="true">127.0.0.1</domain>
     </domain-config>
