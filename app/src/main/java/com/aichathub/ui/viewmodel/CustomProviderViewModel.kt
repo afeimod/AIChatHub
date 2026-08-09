@@ -99,7 +99,7 @@ class CustomProviderViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 deleteCustomProviderUseCase(id)
-                _uiState.update { it.copy(message = "已删除自定义平台") })
+                _uiState.update { it.copy(message = "已删除自定义平台") }
             } catch (e: Exception) {
                 _uiState.update { it.copy(error = "删除失败: ${e.message}") }
             }
